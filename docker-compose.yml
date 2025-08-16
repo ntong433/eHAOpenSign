@@ -11,10 +11,11 @@ services:
     env_file: .env.prod
     environment:
       - NODE_ENV=production
-      - SERVER_URL=${HOST_URL:-https://localhost:3001}/api/app
-      - PUBLIC_URL=${HOST_URL:-https://localhost:3001}
+      - SERVER_URL=${HOST_URL:-https://sign.apps.lhinigeria.org}/api/app
+      - PUBLIC_URL=${HOST_URL:-https://sign.apps.lhinigeria.org}
     networks:
       - app-network
+
   mongo:
     image: mongo:latest
     container_name: mongo-container
@@ -24,6 +25,7 @@ services:
       - "27018:27017"
     networks:
       - app-network
+
   client:
     image: opensign/opensign:main
     container_name: OpenSign-container
@@ -34,29 +36,11 @@ services:
       - "3000:3000"
     networks:
       - app-network
-  caddy:
-    image: caddy:latest
-    container_name: caddy-container
-    ports:
-      - "3001:3001"
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - app-network
-    environment:
-      - HOST_URL=${HOST_URL:-localhost:3001}
+
 networks:
   app-network:
     driver: bridge
 
 volumes:
   data-volume:
-  web-root:
-  caddy_data:
-  caddy_config:
   opensign-files:
