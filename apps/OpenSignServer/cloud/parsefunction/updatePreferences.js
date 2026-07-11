@@ -5,6 +5,7 @@ export default async function updatePreferences(request) {
   const SignatureType = request.params.SignatureType || [];
   const NotifyOnSignatures = request.params.NotifyOnSignatures;
   const Timezone = request.params.Timezone;
+  const UseNameAsSender = request.params.UseNameAsSender;
   if (SignatureType?.length > 0 || NotifyOnSignatures !== undefined || Timezone) {
     try {
       const orgQuery = new Parse.Query('contracts_Users');
@@ -56,6 +57,12 @@ export default async function updatePreferences(request) {
         }
         if (request.params.IsLTVEnabled !== undefined) {
           newOrg.set('IsLTVEnabled', request.params.IsLTVEnabled);
+        }
+        if (request.params.DownloadFilenameFormat) {
+          newOrg.set('DownloadFilenameFormat', request.params.DownloadFilenameFormat);
+        }
+        if (UseNameAsSender !== undefined) {
+          newOrg.set('UseNameAsSender', UseNameAsSender);
         }
         const updateUserRes = await newOrg.save(null, { useMasterKey: true });
         if (updateUserRes) {

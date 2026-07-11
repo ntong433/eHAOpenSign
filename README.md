@@ -60,7 +60,7 @@ Welcome to OpenSign, the premier open source docusign alternative - document e-s
 - **PDF Template Creation:** OpenSign™ allows you to create and store PDF document templates for repeated use thereby saving you a lot of time & collect e-signatures seamlessly.
 - **OpenSign™ Drive:** It is a centralised secure vault for your digital documents that makes storing, signing, organizing, sharing & archieving your docs a breeze.
 - **Audit Trails & completion certificate:** Being a security focused solution, OpenSign™ makes it a top priority to save detailed logs for tracking document activities along with time-stamps, IP addresses, email IDs & phone numbers. A completion certificate is generated as soon as document is completed which contains all the document related logs for added safety.
-- **API Support:** OpenSign™ API allows seamless integration into existing systems and software. You can generate an API key from the app and refer the [official API docs](https://docs.opensignlabs.com/docs/API-docs/opensign-api-v-1) to start integrating it in your existing applications.
+- **API Support:** OpenSign™ API allows seamless integration into existing systems and software. You can generate an API key from the app and refer the [official API docs](https://docs.opensignlabs.com/docs/API-docs/v1.1) to start integrating it in your existing applications.
 - **Integrations:** The open source document signing experience becomes even more seamless because of integrations with various Cloud storage systems, CRMs & enterprise platforms. We also have a Zapier integration that allows you to integrate it with virtually any application.
 <img alt="Login page" src="https://github.com/OpenSignLabs/OpenSign/assets/171803164/8016edb6-7d6e-4185-ab72-82d2c4a16032" height='200' > 
 <img alt="Dash_board" src="https://github.com/OpenSignLabs/OpenSign/assets/171803164/6e7b96f7-3154-4c25-bc1e-caf33925cc47" height='200'>
@@ -165,6 +165,7 @@ We would like to thank all our contributors and users for their support and feed
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/daniel-mutwiri"><img src="https://avatars.githubusercontent.com/u/8936960?v=4?s=100" width="100px;" alt="Daniel Mutwiri"/><br /><sub><b>Daniel Mutwiri</b></sub></a><br /><a href="#code-daniel-mutwiri" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Zathiel"><img src="https://avatars.githubusercontent.com/u/26553418?v=4?s=100" width="100px;" alt="Zathiel"/><br /><sub><b>Zathiel</b></sub></a><br /><a href="#code-Zathiel" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/1024mb"><img src="https://avatars.githubusercontent.com/u/9301204?v=4?s=100" width="100px;" alt="1024mb"/><br /><sub><b>1024mb</b></sub></a><br /><a href="#translation-1024mb" title="Translation">🌍</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ehowe"><img src="https://avatars.githubusercontent.com/u/756984?v=4?s=100" width="100px;" alt="Eugene Howe"/><br /><sub><b>Eugene Howe</b></sub></a><br /><a href="#code-ehowe" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

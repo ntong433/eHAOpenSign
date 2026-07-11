@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Parse from "parse";
-import Title from "./Title";
 import Loader from "../primitives/Loader";
 import {
   copytoData,
@@ -12,6 +11,8 @@ import {
 import {
   useTranslation
 } from "react-i18next";
+import { withSessionValidation } from "../utils";
+
 function generatePassword(length) {
   const characters =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -68,11 +69,11 @@ const AddUser = (props) => {
     }
   };
   // Define a function to handle form submission
-  const handleSubmit = async (e) => {
+  const handleSubmit = withSessionValidation(async (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (!emailRegex.test(formdata.email)) {
-      alert("Please enter a valid email address.");
+      alert(t("valid-email-alert"));
     } else {
       const localUser = JSON.parse(localStorage.getItem("Extand_Class"))?.[0];
       setIsFormLoader(true);
@@ -100,7 +101,6 @@ const AddUser = (props) => {
             };
             const res = await Parse.Cloud.run("adduser", params);
             const parseData = JSON.parse(JSON.stringify(res));
-            console.log("parseData ", parseData);
             if (props.closePopup) {
               props.closePopup();
             }
@@ -132,7 +132,7 @@ const AddUser = (props) => {
         }
       }
     }
-  };
+  });
 
   // Define a function to handle the "add yourself" checkbox
   const handleReset = () => {
@@ -155,7 +155,6 @@ const AddUser = (props) => {
   };
   return (
     <div className="shadow-md rounded-box my-[1px] p-3 bg-base-100 relative">
-      <Title title={t("add-user")} />
       {isFormLoader && (
         <div className="absolute w-full h-full inset-0 flex justify-center items-center bg-base-content/30 z-50">
           <Loader />
@@ -166,7 +165,7 @@ const AddUser = (props) => {
                       <div className="mb-3">
                         <label
                           htmlFor="name"
-                          className="block text-xs text-gray-700 font-semibold"
+                          className="block text-xs font-semibold"
                         >
                           {t("name")}
                           <span className="text-[red] text-[13px]"> *</span>
@@ -182,12 +181,13 @@ const AddUser = (props) => {
                           onInput={(e) => e.target.setCustomValidity("")}
                           required
                           className="op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content w-full text-xs"
+                          placeholder={t("enter-name")}
                         />
                       </div>
                       <div className="mb-3">
                         <label
                           htmlFor="email"
-                          className="block text-xs text-gray-700 font-semibold"
+                          className="block text-xs font-semibold"
                         >
                           {t("email")}
                           <span className="text-[red] text-[13px]"> *</span>
@@ -203,10 +203,11 @@ const AddUser = (props) => {
                           }
                           onInput={(e) => e.target.setCustomValidity("")}
                           className="op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content w-full text-xs"
+                          placeholder={t("enter-email")}
                         />
                       </div>
                       <div className="mb-3">
-                        <label className="block text-xs text-gray-700 font-semibold">
+                        <label className="block text-xs font-semibold">
                           {t("password")}
                         </label>
                         <div className="flex justify-between items-center op-input op-input-bordered op-input-sm text-base-content w-full h-full text-[13px]">
@@ -217,16 +218,15 @@ const AddUser = (props) => {
                           ></i>
                         </div>
                         <div className="text-[12px] ml-2 mb-0 text-[red] select-none">
-                          {t("password-generateed")}
+                          {t("password-generated")}
                         </div>
                       </div>
                       <div className="mb-3">
                         <label
                           htmlFor="phone"
-                          className="block text-xs text-gray-700 font-semibold"
+                          className="block text-xs font-semibold"
                         >
                           {t("phone")}
-                          {/* <span className="text-[red] text-[13px]"> *</span> */}
                         </label>
                         <input
                           type="text"
@@ -240,7 +240,7 @@ const AddUser = (props) => {
                       <div className="mb-3">
                         <label
                           htmlFor="phone"
-                          className="block text-xs text-gray-700 font-semibold"
+                          className="block text-xs font-semibold"
                         >
                           {t("Role")}
                           <span className="text-[red] text-[13px]"> *</span>

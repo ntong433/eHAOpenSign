@@ -1,10 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { PDFDocument } from "pdf-lib";
 import "../styles/signature.css";
 import Parse from "parse";
 import axios from "axios";
-import { DndProvider, useDrop } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
 import { useDispatch, useSelector } from "react-redux";
 import RenderAllPdfPage from "../components/pdf/RenderAllPdfPage";
 import Tour from "../primitives/Tour";
@@ -14,11 +12,14 @@ import {
   setSaveSignCheckbox,
   setMyInitial,
   setDefaultSignImg,
-  resetWidgetState
-} from "../redux/reducers/widgetSlice.js";
+  resetWidgetState,
+  setPrefillImg,
+  setTypedSignFont,
+  setMyStamp
+} from "../redux/reducers/widgetSlice";
 import {
   contractDocument,
-  multiSignEmbed,
+  embedWidgetsToDoc,
   embedDocId,
   pdfNewWidthFun,
   signPdfFun,
@@ -48,13 +49,13 @@ import {
   widgetDataValue,
   getOriginalWH,
   handleCheckResponse,
+  convertJpegToPng,
 } from "../constant/Utils";
 import Header from "../components/pdf/PdfHeader";
 import RenderPdf from "../components/pdf/RenderPdf";
-import Title from "../components/Title";
 import DefaultSignature from "../components/pdf/DefaultSignature";
 import SignerListComponent from "../components/pdf/SignerListComponent";
-import PdfZoom from "../components/pdf/PdfZoom";
+import PdfTools from "../components/pdf/PdfTools";
 import { useTranslation } from "react-i18next";
 import ModalUi from "../primitives/ModalUi";
 import TourContentWithBtn from "../primitives/TourContentWithBtn";
@@ -68,12 +69,18 @@ import AgreementSign from "../components/pdf/AgreementSign";
 import WidgetComponent from "../components/pdf/WidgetComponent";
 import PlaceholderCopy from "../components/pdf/PlaceholderCopy";
 import TextFontSetting from "../components/pdf/TextFontSetting";
-import WidgetsValueModal from "../components/pdf/WidgetsValueModal.jsx";
+import WidgetsValueModal from "../components/pdf/WidgetsValueModal";
+import * as utils from "../utils";
+import { useWindowSize } from "../hook/useWindowSize";
+import { useScroll } from "../context/ScrollPdfContext";
 
 function PdfRequestFiles(
 ) {
   const { t } = useTranslation();
   const dispatch = useDispatch();
+  const windowSize = useWindowSize();
+  const { scrollRef } = useScroll();
+  const prefillImg = useSelector((state) => state.widget.prefillImg);
   const isShowModal = useSelector((state) => state.widget.isShowModal);
   const defaultSignImg = useSelector((state) => state.widget.defaultSignImg);
   const myInitial = useSelector((state) => state.widget.myInitial);
@@ -88,8 +95,9 @@ function PdfRequestFiles(
   const [pageNumber, setPageNumber] = useState(1);
   const [handleError, setHandleError] = useState();
   const [isCelebration, setIsCelebration] = useState(false);
-  const [requestSignTour, setRequestSignTour] = useState(true);
+  const [isReqSignTourDisabled, setIsReqSignTourDisabled] = useState(true);
   const [tourStatus, setTourStatus] = useState([]);
+  const [isDontShowCheckbox, setIsDontShowCheckbox] = useState(false);
   const [isLoading, setIsLoading] = useState({
     isLoad: true,
     message: t("loading-mssg")
@@ -107,11 +115,8 @@ function PdfRequestFiles(
   const [expiredDate, setExpiredDate] = useState("");
   const [isResize, setIsResize] = useState(false);
   const [signerUserId, setSignerUserId] = useState();
-  const [isDontShow, setIsDontShow] = useState(false);
+  const [isDontShow, setIsDontShow] = useState(true);
   const [isDownloading, setIsDownloading] = useState("");
-  // tempSignerId is used to temporarily store the currently selected signer's unique ID, When editing a text widget, it automatically attaches a prefill user, and since prefill users are not shown in the signer list, the selected signer from before editing would be lost. To handle this, we store the currently selected signer's unique ID in tempSignerId before entering the text widget edit mode. Once the text widget settings are completed,
-  // we restore the original selected signer by setting tempSignerId back to uniqueId.This ensures that the correct signer remains selected and visible in the UI even after interacting with a prefill-only widget like the text widget.
-  const [tempSignerId, setTempSignerId] = useState("");
   const [defaultSignAlert, setDefaultSignAlert] = useState({
     isShow: false,
     alertMessage: ""
@@ -124,7 +129,7 @@ function PdfRequestFiles(
   const [isSigned, setIsSigned] = useState(false);
   const [isExpired, setIsExpired] = useState(false);
   const [alreadySign, setAlreadySign] = useState(false);
-  const [containerWH, setContainerWH] = useState({});
+  const [containerWH, setContainerWH] = useState({ width: 0, height: 0 });
   const [widgetsTour, setWidgetsTour] = useState(false);
   const [minRequiredCount, setminRequiredCount] = useState();
   const [sendInOrder, setSendInOrder] = useState(false);
@@ -135,7 +140,7 @@ function PdfRequestFiles(
   const [scale, setScale] = useState(1);
   const [uniqueId, setUniqueId] = useState("");
   const [documentId, setDocumentId] = useState("");
-  const isHeader = useSelector((state) => state.showHeader);
+  const isSidebar = useSelector((state) => state.sidebar.isOpen);
   const divRef = useRef(null);
   const [isDownloadModal, setIsDownloadModal] = useState(false);
   const [signatureType, setSignatureType] = useState([]);
@@ -155,10 +160,9 @@ function PdfRequestFiles(
   const [assignedWidgetId, setAssignedWidgetId] = useState([]);
   const [showSignPagenumber, setShowSignPagenumber] = useState([]);
   const [owner, setOwner] = useState({});
-  const [, drop] = useDrop({
-    accept: "BOX",
-    drop: (item, monitor) => addPositionOfSignature(item, monitor),
-    collect: (monitor) => ({ isOver: !!monitor.isOver() })
+  const [tenantMailTemplate, setTenantMailTemplate] = useState({
+    body: "",
+    subject: ""
   });
   const isMobile = window.innerWidth < 767;
   let isGuestSignFlow = false;
@@ -208,10 +212,10 @@ function PdfRequestFiles(
     };
 
     // Use setTimeout to wait for the transition to complete
-    const timer = setTimeout(updateSize, 100); // match the transition duration
+    const timer = setTimeout(updateSize, 150); // match the transition duration
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [divRef.current, isHeader]);
+  }, [divRef.current, isSidebar, windowSize?.width]);
   const redirectUrl = pdfDetails?.[0]?.RedirectUrl || "";
   useEffect(() => {
     if (isredirectCanceled) return; // Stop the redirect timer if canceled
@@ -225,6 +229,7 @@ function PdfRequestFiles(
       return () => clearTimeout(timer); // Cleanup the timer
     }
   }, [redirectTimeLeft, isredirectCanceled, redirectUrl]);
+
 
   const fetchTenantDetails = async (contactId) => {
     const user = JSON.parse(
@@ -244,6 +249,12 @@ function PdfRequestFiles(
         const filterSignTypes = signatureType?.filter(
           (x) => x.enabled === true
         );
+        if (tenantDetails?.RequestBody) {
+          setTenantMailTemplate({
+            body: tenantDetails?.RequestBody,
+            subject: tenantDetails?.RequestSubject
+          });
+        }
 
         return filterSignTypes;
       }
@@ -258,7 +269,6 @@ function PdfRequestFiles(
     isSuccessPage = false,
   ) => {
     try {
-      let isUpdatedSubscribe;
       const senderUser = localStorage.getItem(
         `Parse/${localStorage.getItem("parseAppId")}/currentUser`
       );
@@ -271,10 +281,11 @@ function PdfRequestFiles(
       const tenantSignTypes = await fetchTenantDetails(contactId);
       // `currUserId` will be contactId or extUserId
       let currUserId;
+
       //getting document details
       const documentData = await contractDocument(docId);
       // Filter out 'prefill' roles from the Placeholder array
-      const filteredPlaceholder = documentData[0].Placeholders.filter(
+      const filteredPlaceholder = documentData[0]?.Placeholders?.filter(
         (data) => data.Role !== "prefill"
       );
       // Reassign the updated Placeholder back to the documentData array
@@ -283,6 +294,14 @@ function PdfRequestFiles(
         Placeholders: filteredPlaceholder
       };
       if (documentData && documentData.length > 0) {
+        const prefillImg = await utils?.savePrefillImg(
+          documentData[0]?.Placeholders
+        );
+        if (prefillImg && Array.isArray(prefillImg)) {
+          prefillImg.forEach((img) => {
+            dispatch(setPrefillImg(img));
+          });
+        }
         const userSignatureType =
           documentData[0]?.ExtUserPtr?.SignatureType || signatureTypes;
         const docSignTypes =
@@ -310,7 +329,7 @@ function PdfRequestFiles(
         setOwner(documentData?.[0]?.ExtUserPtr);
         const isCompleted =
           documentData[0].IsCompleted && documentData[0].IsCompleted;
-        const expireDate = documentData[0].ExpiryDate.iso;
+        const expireDate = documentData[0]?.ExpiryDate?.iso;
         const declined =
           documentData[0].IsDeclined && documentData[0].IsDeclined;
         const expireUpdateDate = new Date(expireDate).getTime();
@@ -321,7 +340,6 @@ function PdfRequestFiles(
         const getCurrentSigner = getSigners?.find(
           (data) => data.UserId.objectId === jsonSender?.objectId
         );
-
         currUserId = getCurrentSigner?.objectId
           ? getCurrentSigner.objectId
           : contactBookId ||
@@ -365,13 +383,15 @@ function PdfRequestFiles(
           }
         } else {
           if (currUserId) {
-            const checkCurrentUser = documentData[0].Placeholders.find(
+            const checkCurrentUser = documentData[0]?.Placeholders?.find(
               (data) => data?.signerObjId === currUserId
             );
             if (checkCurrentUser) {
               const widgetId = [];
-              for (let placeholder of checkCurrentUser.placeHolder) {
-                for (let item of placeholder.pos) {
+              // Viewers and approvers may not have any placeholders/widgets
+              // attached, so guard against an undefined placeHolder array.
+              for (let placeholder of checkCurrentUser.placeHolder || []) {
+                for (let item of placeholder.pos || []) {
                   widgetId.push(item.key);
                 }
               }
@@ -381,6 +401,7 @@ function PdfRequestFiles(
             }
           }
         }
+        // Approved entries also count toward audit trail completion summary.
         const audittrailData = documentData?.[0]?.AuditTrail?.filter(
           (data) => data.Activity === "Signed"
         );
@@ -388,27 +409,61 @@ function PdfRequestFiles(
           documentData?.[0]?.AuditTrail?.some(
             (data) =>
               data?.UserPtr?.objectId === currUserId &&
-              data.Activity === "Signed"
+                (data.Activity === "Signed"
+              )
           ) || false;
         if (checkAlreadySign) {
           setAlreadySign(true);
         } else {
           const obj = documentData?.[0];
           setSendInOrder(obj?.SendinOrder || false);
+          if (
+            obj?.Signers?.length &&
+            obj?.Placeholders?.length &&
+            currUserId !== "undefined"
+          ) {
+            const params = {
+              event: "viewed",
+              contactId: currUserId,
+              body: {
+                objectId: documentData?.[0].objectId,
+              }
+            };
+            try {
+              await axios.post(
+                `${localStorage.getItem("baseUrl")}functions/triggerevent`,
+                params,
+                {
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-Parse-Application-Id":
+                      localStorage.getItem("parseAppId"),
+                    sessiontoken: localStorage.getItem("accesstoken")
+                  }
+                }
+              );
+            } catch (err) {
+              console.log("Err ", err);
+            }
+          }
         }
 
         let signers = [];
         let unSignedSigner = [];
-
+        const removePrefill = documentData[0]?.Placeholders.filter(
+          (x) => x.Role !== "prefill"
+        );
         const placeholdersOrSigners = [];
-        for (const placeholder of documentData[0].Placeholders) {
+        for (const placeholder of removePrefill) {
           //`emailExist` variable to handle condition for quick send flow and show unsigned signers list
           const signerIdExist = placeholder?.signerObjId;
           if (signerIdExist) {
             const getSignerData = documentData[0].Signers.find(
               (data) => data.objectId === placeholder?.signerObjId
             );
-            placeholdersOrSigners.push(getSignerData);
+            placeholdersOrSigners.push({
+              ...getSignerData,
+            });
           } else {
             placeholdersOrSigners.push(placeholder);
           }
@@ -454,10 +509,9 @@ function PdfRequestFiles(
           checkAlreadySign ||
           !currUserId ||
           declined ||
-          currDate > expireUpdateDate ||
-          !isTourEnabled
+          currDate > expireUpdateDate
         ) {
-          setRequestSignTour(true);
+          setIsReqSignTourDisabled(true);
         } else {
           const isEnableOTP = documentData?.[0]?.IsEnableOTP || false;
           const sessionToken = localStorage.getItem("accesstoken");
@@ -471,17 +525,8 @@ function PdfRequestFiles(
               setContractName("_Users");
               currUserId = res[0].objectId;
               setSignerUserId(currUserId);
-              const tourData = res[0].TourStatus && res[0].TourStatus;
-              if (tourData && tourData.length > 0) {
-                const checkTourRequest = tourData.filter(
-                  (data) => data?.requestSign
-                );
-                setTourStatus(tourData);
-                setRequestSignTour(checkTourRequest[0]?.requestSign || false);
-              } else {
-                setRequestSignTour(false);
-              }
-
+              storeSignerDetails(res?.[0]);
+              handleTourStatus(isTourEnabled, res?.[0]?.TourStatus);
               //function to get default signatur of current user from `contracts_Signature` class
               const defaultSignRes = await getDefaultSignature(
                 jsonSender?.objectId
@@ -497,6 +542,7 @@ function PdfRequestFiles(
                 const initials = defaultSignRes?.res?.defaultInitial || "";
                 dispatch(setDefaultSignImg(sign));
                 dispatch(setMyInitial(initials));
+                dispatch(setMyStamp(defaultSignRes?.res?.defaultStamp));
               } else {
                 dispatch(setSaveSignCheckbox({ isVisible: true }));
               }
@@ -507,17 +553,9 @@ function PdfRequestFiles(
               } else if (res[0] && res.length) {
                 setContractName("_Contactbook");
                 const objectId = res[0].objectId;
+                storeSignerDetails(res?.[0]);
                 setSignerUserId(objectId);
-                const tourData = res[0].TourStatus && res[0].TourStatus;
-                if (tourData && tourData.length > 0) {
-                  const checkTourRequest = tourData.filter(
-                    (data) => data?.requestSign
-                  );
-                  setTourStatus(tourData);
-                  setRequestSignTour(checkTourRequest[0]?.requestSign || false);
-                } else {
-                  setRequestSignTour(false);
-                }
+                handleTourStatus(isTourEnabled, res?.[0]?.TourStatus);
               } else if (res.length === 0) {
                 setHandleError(t("user-not-exist"));
               }
@@ -535,27 +573,12 @@ function PdfRequestFiles(
                 }
               );
               const contact = resContact?.data?.result;
-              localStorage.setItem(
-                "signer",
-                JSON.stringify({
-                  Name: contact?.Name,
-                  Email: contact?.Email,
-                  UserId: contact?.UserId?.objectId
-                })
-              );
+              storeSignerDetails(contact);
               setContractName("_Contactbook");
               setSignerUserId(contact?.objectId);
-              const tourData = contact?.TourStatus && contact?.TourStatus;
-              if (tourData && tourData.length > 0) {
-                const checkTourRequest =
-                  tourData?.some((data) => data?.requestSign) || false;
-                setTourStatus(tourData);
-                setRequestSignTour(checkTourRequest);
-              } else {
-                setRequestSignTour(false);
-              }
-            } catch (err) {
-              console.log("err while getting tourstatus", err);
+              handleTourStatus(isTourEnabled, contact?.TourStatus);
+            } catch (error) {
+              console.log("err while getting tourstatus", error);
             }
           }
         }
@@ -587,6 +610,38 @@ function PdfRequestFiles(
       setIsLoading({ isLoad: false });
     }
   };
+
+  // `storeSignerDetails` is used to stor signer details to set in text type widgets
+  const storeSignerDetails = (signer) => {
+    localStorage.setItem(
+      "signer",
+      JSON.stringify({
+        Name: signer?.Name,
+        Email: signer?.Email,
+        UserId: signer?.UserId?.objectId,
+        JobTitle: signer?.JobTitle,
+        Company: signer?.Company
+      })
+    );
+  };
+
+  // `handleTourStatus` is used to disable/enable tour
+  const handleTourStatus = (isTourEnabled, tourData) => {
+    if (isTourEnabled) {
+      if (tourData && tourData.length > 0) {
+        const checkTourRequest =
+          tourData?.some((data) => data?.requestSign) || false;
+        setTourStatus(tourData);
+        setIsDontShowCheckbox(!checkTourRequest);
+        setIsReqSignTourDisabled(checkTourRequest);
+      } else {
+        setIsReqSignTourDisabled(false);
+      }
+    } else {
+      setIsReqSignTourDisabled(true);
+    }
+  };
+
   //function for embed signature or image url in pdf
   async function embedWidgetsData(
   ) {
@@ -645,17 +700,46 @@ function PdfRequestFiles(
             // `widgets` is Used to return widgets details with page number of current user
             const widgets = checkUser?.[0]?.placeHolder;
             let pdfArrBuffer;
+            const isSignYourSelfFlow = false;
             //`contractDocument` function used to get updated SignedUrl
             // to resolve issue of widgets get remove automatically when more than 1 signers try to sign doc at a time
             const documentData = await contractDocument(docId);
             if (documentData && documentData.length > 0) {
               const url = documentData[0]?.SignedUrl || documentData[0]?.URL;
+              const isDeclined = documentData?.[0]?.IsDeclined || false;
+              if (isDeclined) {
+                setIsDecline({
+                  isDeclined,
+                  currnt: "another",
+                  email: documentData?.[0]?.DeclineBy?.email || "",
+                  reason: documentData?.[0]?.DeclineReason || ""
+                });
+                setIsUiLoading(false);
+                return;
+              }
               //convert document url in array buffer format to use embed widgets in pdf using pdf-lib
               const arrayBuffer = await convertPdfArrayBuffer(url);
               if (arrayBuffer === "Error") {
                 setHandleError("Error: invalid document!");
               } else {
                 pdfArrBuffer = arrayBuffer;
+              }
+              const prefillDetails = signerPos.find(
+                (x) => x.Role === "prefill"
+              );
+              //condition to embed prefill widgets details in pdf in public signing flow
+              if (prefillDetails && props.templateId) {
+                const prefillwidgets = prefillDetails?.placeHolder;
+                const pdfDoc = await PDFDocument.load(pdfArrBuffer);
+                const pdfbase64 = await embedWidgetsToDoc(
+                  prefillwidgets,
+                  pdfDoc,
+                  isSignYourSelfFlow,
+                  scale,
+                  prefillImg
+                );
+                //convert base64 to arraybuffer is used in pdf-lib
+                pdfArrBuffer = base64ToArrayBuffer(pdfbase64);
               }
             } else if (
               documentData === "Error: Something went wrong!" ||
@@ -669,11 +753,8 @@ function PdfRequestFiles(
             } else {
               setHandleError("Document not Found!");
             }
-            // Load a PDFDocument from the existing PDF bytes
-            const existingPdfBytes = pdfArrBuffer;
             try {
-              const pdfDoc = await PDFDocument.load(existingPdfBytes);
-              const isSignYourSelfFlow = false;
+              const pdfDoc = await PDFDocument.load(pdfArrBuffer);
               const extUserPtr = pdfDetails[0].ExtUserPtr;
               const HeaderDocId = extUserPtr?.HeaderDocId;
               //embed document's object id to all pages in pdf document
@@ -684,7 +765,7 @@ function PdfRequestFiles(
                 }
               }
               //embed all widgets in document
-              const pdfBytes = await multiSignEmbed(
+              const pdfBytes = await embedWidgetsToDoc(
                 widgets,
                 pdfDoc,
                 isSignYourSelfFlow,
@@ -699,9 +780,11 @@ function PdfRequestFiles(
                   docId,
                   contactId,
                   objectId,
-                  widgets
+                  widgets,
+                  "Signed"
                 );
                 if (resSign && resSign.status === "success") {
+                  dispatch(setTypedSignFont("Fasthand"));
                   setPdfUrl(resSign.data);
                   setIsSigned(true);
                   setSignedSigners([]);
@@ -719,11 +802,15 @@ function PdfRequestFiles(
                     updatedDoc.updatedPdfDetails?.[0]?.Signers.findIndex(
                       (x) => x.objectId === contactId
                     );
-                  const newIndex = index + 1;
+                  const removePrefill =
+                    updatedDoc.updatedPdfDetails?.[0]?.Placeholders?.filter(
+                      (x) => x.Role !== "prefill"
+                    );
+                  // Skip viewer placeholders when computing the next signer
+                  // to notify (viewers do not gate sequential signing).
+                  let newIndex = index + 1;
                   const usermail = {
-                    Email:
-                      updatedDoc.updatedPdfDetails?.[0]?.Placeholders[newIndex]
-                        ?.email || ""
+                    Email: removePrefill[newIndex]?.email || ""
                   };
                   const user = usermail?.Email
                     ? usermail
@@ -732,10 +819,16 @@ function PdfRequestFiles(
                     sendmail !== "false" &&
                     sendInOrder
                   ) {
+                    const mailBody =
+                          tenantMailTemplate?.body;
+                    const mailSubject =
+                          tenantMailTemplate?.subject;
                     const requestBody =
-                      updatedDoc.updatedPdfDetails?.[0]?.RequestBody;
+                      updatedDoc.updatedPdfDetails?.[0]?.RequestBody ||
+                      mailBody;
                     const requestSubject =
-                      updatedDoc.updatedPdfDetails?.[0]?.RequestSubject;
+                      updatedDoc.updatedPdfDetails?.[0]?.RequestSubject ||
+                      mailSubject;
                     if (user) {
                       const expireDate = expiry;
                       const newDate = new Date(expireDate);
@@ -744,9 +837,11 @@ function PdfRequestFiles(
                         { day: "numeric", month: "long", year: "numeric" }
                       );
                       let senderEmail =
+                        pdfDetails?.[0]?.SenderMail ||
                         pdfDetails?.[0]?.ExtUserPtr?.Email;
                       let senderPhone = pdfDetails?.[0]?.ExtUserPtr?.Phone;
                       const senderName =
+                        pdfDetails?.[0]?.SenderName ||
                         pdfDetails?.[0].ExtUserPtr.Name;
                       const documentName = pdfDetails?.[0].Name;
                       try {
@@ -823,6 +918,7 @@ function PdfRequestFiles(
                             ? replaceVar?.subject
                             : mailTemplate(mailparam).subject,
                           from:
+                            pdfDetails?.[0]?.SenderName ||
                             senderEmail,
                           html: replaceVar?.body
                             ? replaceVar?.body
@@ -846,7 +942,8 @@ function PdfRequestFiles(
                       ?.IsCompleted
                       ? `&completed=true`
                       : "";
-                    const params = `docid=${updatedDoc.updatedPdfDetails[0].objectId}&docurl=${encodeURIComponent(url)}${isCompleted}${fileAdapter}`;
+                    const params =
+                          `docid=${updatedDoc.updatedPdfDetails[0].objectId}&docurl=${encodeURIComponent(url)}${isCompleted}${fileAdapter}`;
                     window.location.href = `/success?${params}`;
                   }
                 } else {
@@ -909,22 +1006,23 @@ function PdfRequestFiles(
     setIsDragging(true);
   };
   //function for set and update x and y postion after drag and drop signature tab
-  const handleStop = (event, dragElement, signerId, key) => {
+  const handleStop = (event, dragElement, signerId, key, widgetPageNumber) => {
     if (!isResize && isDragging) {
+      const effectivePageNumber = widgetPageNumber || pageNumber;
       let updateSignPos = [...signerPos];
       const signerObjId = signerId ? signerId : uniqueId;
       const keyValue = key ? key : dragKey;
       const containerScale = getContainerScale(
         pdfOriginalWH,
-        pageNumber,
+        effectivePageNumber,
         containerWH
       );
       if (keyValue >= 0) {
         let filterSignerPos = [];
         if (signerObjId) {
           //get current signerObjId placeholder details
-          filterSignerPos = updateSignPos?.filter(
-            (data) => data.Id === signerObjId
+          filterSignerPos = updateSignPos.filter(
+            (data) => data.Id === signerObjId && data.Role !== "prefill"
           );
         }
 
@@ -932,7 +1030,7 @@ function PdfRequestFiles(
           const getPlaceHolder = filterSignerPos[0]?.placeHolder;
           //get position of current pagenumber
           const getPageNumer = getPlaceHolder?.filter(
-            (data) => data.pageNumber === pageNumber
+            (data) => data.pageNumber === effectivePageNumber
           );
           if (getPageNumer.length > 0) {
             const getXYdata = getPageNumer[0].pos;
@@ -941,15 +1039,15 @@ function PdfRequestFiles(
               if (url.key === keyValue) {
                 return {
                   ...url,
-                  xPosition: dragElement.x / (containerScale * scale),
-                  yPosition: dragElement.y / (containerScale * scale)
+                  xPosition: dragElement.x / containerScale,
+                  yPosition: dragElement.y / containerScale
                 };
               }
               return url;
             });
             //update new position of current page number
             const newUpdateSignPos = getPlaceHolder.map((obj) => {
-              if (obj.pageNumber === pageNumber) {
+              if (obj.pageNumber === effectivePageNumber) {
                 return { ...obj, pos: addSignPos };
               }
               return obj;
@@ -957,7 +1055,7 @@ function PdfRequestFiles(
             //update new placeholder of current signer
             const newUpdateSigner = updateSignPos.map((obj) => {
               if (signerObjId) {
-                if (obj.Id === signerObjId) {
+                if (obj.Id === uniqueId && obj.Role !== "prefill") {
                   return { ...obj, placeHolder: newUpdateSignPos };
                 }
               }
@@ -975,11 +1073,12 @@ function PdfRequestFiles(
     setIsTextSetting(value);
   };
   const handleSaveFontSize = () => {
+    const widgetPageNumber = currWidgetsDetails?.pageNumber || pageNumber;
     const filterSignerPos = signerPos?.filter((data) => data.Id === uniqueId);
     if (filterSignerPos) {
       const placehoder = filterSignerPos[0]?.placeHolder;
       const getPageNumer = placehoder.filter(
-        (data) => data.pageNumber === pageNumber
+        (data) => data.pageNumber === widgetPageNumber
       );
       if (getPageNumer.length > 0) {
         const getXYdata = getPageNumer[0].pos;
@@ -1002,7 +1101,7 @@ function PdfRequestFiles(
 
         //update new position of current page number
         const newUpdateSignPos = placehoder.map((obj) => {
-          if (obj.pageNumber === pageNumber) {
+          if (obj.pageNumber === widgetPageNumber) {
             return { ...obj, pos: updateSignPos };
           }
           return obj;
@@ -1034,15 +1133,15 @@ function PdfRequestFiles(
         ? t("signature-validate-alert", { minRequiredCount })
         : t("signature-validate-alert-2"),
       position: "top",
-      style: { fontSize: "13px" }
+      styles: { fontSize: "13px" }
     }
   ];
   //function for get pdf page details
-  const pageDetails = async (pdf) => {
-    const pdfWHObj = await getOriginalWH(pdf);
-    setPdfOriginalWH(pdfWHObj);
-    setPdfLoad(true);
-  };
+ const pageDetails = async (pdf) => {
+  const pdfWHObj = await getOriginalWH(pdf);
+  setPdfOriginalWH(pdfWHObj);
+  setPdfLoad(true);
+};
   //function for change page
   function changePage(offset) {
     setPageNumber((prevPageNumber) => prevPageNumber + offset);
@@ -1058,10 +1157,11 @@ function PdfRequestFiles(
     const userId =
       pdfDetails?.[0].Signers?.find((x) => x.objectId === signerObjectId)
         ?.UserId?.objectId || jsonSender?.objectId;
+
     const params = {
       docId: pdfDetails?.[0].objectId,
       reason: reason,
-      userId: userId
+      userId: userId,
     };
     await axios
       .post(`${localStorage.getItem("baseUrl")}functions/declinedoc`, params, {
@@ -1090,19 +1190,18 @@ function PdfRequestFiles(
       });
   };
   //function to add default signature for all requested placeholder of sign
-  const addDefaultSignature = () => {
+  const addDefaultSignature = async () => {
     const type = defaultSignAlert?.type;
     //get current signers placeholder position data
     const currentSignerPosition = signerPos?.filter(
       (data) => data.signerObjId === signerObjectId
     );
     const defaultSign = type === "signature" ? defaultSignImg : myInitial;
+    const placeHolder = currentSignerPosition[0].placeHolder;
+    const filename = type === "signature" ? "mysign" : "myinitials";
+    const signImg = await convertJpegToPng(defaultSign, filename);
     //function for save default signature url for all placeholder position
-    const updatePlace = addDefaultSignatureImg(
-      currentSignerPosition[0].placeHolder,
-      defaultSign,
-      type
-    );
+    const updatePlace = addDefaultSignatureImg(placeHolder, signImg, type);
 
     const updatesignerPos = signerPos.map((x) =>
       x.signerObjId === signerObjectId ? { ...x, placeHolder: updatePlace } : x
@@ -1115,7 +1214,7 @@ function PdfRequestFiles(
   };
   //function to close tour and save tour status
   const closeRequestSignTour = async () => {
-    setRequestSignTour(true);
+    setIsReqSignTourDisabled(true);
     if (isDontShow) {
       const isEnableOTP = pdfDetails?.[0]?.IsEnableOTP || false;
       const sessionToken = localStorage.getItem("accesstoken");
@@ -1186,44 +1285,60 @@ function PdfRequestFiles(
         content: () => (
           <TourContentWithBtn
             message={t("tour-mssg.pdf-request-file-6", { pagenumbers })}
+            isDontShowCheckbox={isDontShowCheckbox}
             isChecked={handleDontShow}
           />
         ),
         position: "top",
-        style: { fontSize: "13px" }
+        styles: { fontSize: "13px" }
       },
       {
         selector: '[data-tut="reactourFirst"]',
         content: () => (
           <TourContentWithBtn
             message={t("tour-mssg.pdf-request-file-1")}
+            isDontShowCheckbox={isDontShowCheckbox}
             isChecked={handleDontShow}
           />
         ),
         position: "top",
-        style: { fontSize: "13px" }
+        styles: { fontSize: "13px" }
       },
       {
         selector: '[data-tut="pdfArea"]',
         content: () => (
           <TourContentWithBtn
             message={t("tour-mssg.pdf-request-file-2")}
+            isDontShowCheckbox={isDontShowCheckbox}
             isChecked={handleDontShow}
           />
         ),
         position: "top",
-        style: { fontSize: "13px" }
+        styles: { fontSize: "13px" }
+      },
+      {
+        selector: '[data-tut="pdftools"]',
+        content: () => (
+          <TourContentWithBtn
+            message={t("pdf-tools-tour")}
+            isDontShowCheckbox={isDontShowCheckbox}
+            isChecked={handleDontShow}
+          />
+        ),
+        position: "top",
+        styles: { fontSize: "13px" }
       },
       {
         selector: '[data-tut="reactourFifth"]',
         content: () => (
           <TourContentWithBtn
             message={t("tour-mssg.pdf-request-file-3")}
+            isDontShowCheckbox={isDontShowCheckbox}
             isChecked={handleDontShow}
           />
         ),
         position: "top",
-        style: { fontSize: "13px" }
+        styles: { fontSize: "13px" }
       }
     ];
     const signedByStep = {
@@ -1231,11 +1346,12 @@ function PdfRequestFiles(
       content: () => (
         <TourContentWithBtn
           message={t("tour-mssg.pdf-request-file-4")}
+          isDontShowCheckbox={isDontShowCheckbox}
           isChecked={handleDontShow}
         />
       ),
       position: "top",
-      style: { fontSize: "13px" }
+      styles: { fontSize: "13px" }
     };
     //checking if signed by user component exist then add signed by tour step
     const signedBy =
@@ -1249,11 +1365,12 @@ function PdfRequestFiles(
       content: () => (
         <TourContentWithBtn
           message={t("tour-mssg.pdf-request-file-5")}
+          isDontShowCheckbox={isDontShowCheckbox}
           isChecked={handleDontShow}
         />
       ),
       position: "top",
-      style: { fontSize: "13px" }
+      styles: { fontSize: "13px" }
     };
     //checking if AllowModifications is true then add allow widgets panel tour step
     const allModifyWidgets = {
@@ -1261,11 +1378,12 @@ function PdfRequestFiles(
       content: () => (
         <TourContentWithBtn
           message={t("tour-mssg.allowModify-widgets")}
+          isDontShowCheckbox={isDontShowCheckbox}
           isChecked={handleDontShow}
         />
       ),
       position: "top",
-      style: { fontSize: "13px" }
+      styles: { fontSize: "13px" }
     };
 
     //handle signed by panel index if signed by exist then 2 else 1 to add tour step
@@ -1297,29 +1415,38 @@ function PdfRequestFiles(
         onRequestClose={closeRequestSignTour}
         steps={isMobile ? mobileTour : defaultSignTour}
         isOpen={true}
-        closeWithMask={false}
-        rounded={5}
       />
     );
   };
 
+  const handleCloseTour = () => {
+    closeTour();
+    setIsReqSignTourDisabled(true);
+  };
 
   const clickOnZoomIn = () => {
-    onClickZoomIn(scale, zoomPercent, setScale, setZoomPercent);
+    onClickZoomIn(scale, setScale, scrollRef);
   };
   const clickOnZoomOut = () => {
-    onClickZoomOut(zoomPercent, scale, setZoomPercent, setScale);
+    onClickZoomOut(scale, setScale, scrollRef);
   };
   const handleDownloadBtn = async () => {
     const url = pdfDetails?.[0]?.SignedUrl || pdfDetails?.[0]?.URL;
+    const isCompleted = pdfDetails?.[0]?.IsCompleted || false;
     const name =
       pdfDetails?.[0]?.Name?.length > 100
         ? pdfDetails?.[0]?.Name?.slice(0, 100)
         : pdfDetails?.[0]?.Name || "Document";
-    await fetchUrl(url, name);
+    const formatId = pdfDetails?.[0]?.ExtUserPtr?.DownloadFilenameFormat;
+    const docName = utils?.buildDownloadFilename(formatId, {
+      docName: name,
+      isSigned: isCompleted
+    });
+    await fetchUrl(url, docName);
   };
   const handleDeclineMssg = () => {
-    const user = pdfDetails[0]?.DeclineBy?.email;
+    const user = pdfDetails[0]?.DeclineBy?.email || isDecline?.email;
+    const reason = pdfDetails[0]?.DeclineReason || isDecline?.reason;
     return (
       <div>
         {t("decline-alert-3")}
@@ -1329,8 +1456,7 @@ function PdfRequestFiles(
         </div>
         <div className="mt-2">
           {" "}
-          <span className="font-medium">{t("reason")}</span> :{" "}
-          {pdfDetails[0]?.DeclineReason}{" "}
+          <span className="font-medium">{t("reason")}</span> : {reason}{" "}
         </div>
       </div>
     );
@@ -1400,80 +1526,108 @@ function PdfRequestFiles(
     getSignerPos(item, monitor);
   };
   const getSignerPos = (item, monitor) => {
-    const posZIndex = zIndex + 1;
-    setZIndex(posZIndex);
-    const key = randomId();
-    const containerScale = getContainerScale(
-      pdfOriginalWH,
-      pageNumber,
-      containerWH
-    );
-    let dropData = [],
-      dropObj;
-    let placeHolder;
-    const dragTypeValue = item?.text ? item.text : monitor.type;
-    const widgetWidth =
-      defaultWidthHeight(dragTypeValue).width * containerScale;
-    const widgetHeight =
-      defaultWidthHeight(dragTypeValue).height * containerScale;
-    const extUser = localStorage.getItem("Extand_Class");
-    const parseUser = extUser && JSON.parse(extUser)[0];
-    const widgetValue = widgetDataValue(dragTypeValue, parseUser);
-    //adding and updating drop position in array when user drop signature button in div
-    if (item === "onclick") {
-      // `getBoundingClientRect()` is used to get accurate measurement width, height of the Pdf div
-      const divWidth = divRef.current.getBoundingClientRect().width;
-      const divHeight = divRef.current.getBoundingClientRect().height;
-      //  Compute the pixel‐space center within the PDF viewport:
-      const centerX_Pixels = divWidth / 2 - widgetWidth / 2;
-      const xPosition_Final = centerX_Pixels / (containerScale * scale);
-      dropObj = {
-        //onclick put placeholder center on pdf
-        xPosition: xPosition_Final,
-        yPosition: widgetHeight + divHeight / 2,
-        isStamp:
-          (dragTypeValue === "stamp" || dragTypeValue === "image") && true,
-        key: key,
-        scale: containerScale,
-        zIndex: posZIndex,
-        type: dragTypeValue,
-        options: addWidgetOptions(dragTypeValue, owner, widgetValue),
-        Width: widgetWidth / (containerScale * scale),
-        Height: widgetHeight / (containerScale * scale)
-      };
-      dropData.push(dropObj);
-      placeHolder = { pageNumber: pageNumber, pos: dropData };
-    } else {
-      const offset = monitor.getClientOffset();
-      //This method returns the offset of the current pointer (mouse) position relative to the client viewport.
-      const containerRect = document
-        .getElementById("container")
-        .getBoundingClientRect();
-      //`containerRect.left`,  The distance from the left of the viewport to the left side of the element.
-      //`containerRect.top` The distance from the top of the viewport to the top of the element.
-      const x = offset.x - containerRect.left;
-      const y = offset.y - containerRect.top;
-      const getXPosition = signBtnPosition[0] ? x - signBtnPosition[0].xPos : x;
-      const getYPosition = signBtnPosition[0] ? y - signBtnPosition[0].yPos : y;
-      dropObj = {
-        xPosition: getXPosition / (containerScale * scale),
-        yPosition: getYPosition / (containerScale * scale),
-        isStamp:
-          (dragTypeValue === "stamp" || dragTypeValue === "image") && true,
-        key: key,
-        scale: containerScale,
-        zIndex: posZIndex,
-        type: dragTypeValue,
-        options: addWidgetOptions(dragTypeValue, owner, widgetValue),
-        Width: widgetWidth / (containerScale * scale),
-        Height: widgetHeight / (containerScale * scale)
-      };
-      dropData.push(dropObj);
-      placeHolder = { pageNumber: pageNumber, pos: dropData };
-    }
     if (uniqueId) {
-      let filterSignerPos, currentPagePosition;
+      const posZIndex = zIndex + 1;
+      setZIndex(posZIndex);
+      const key = randomId();
+      const containerScale = getContainerScale(
+        pdfOriginalWH,
+        pageNumber,
+        containerWH
+      );
+      let filterSignerPos,
+        currentPagePosition,
+        dropData = [],
+        dropObj,
+        placeHolder;
       filterSignerPos = signerPos?.find((data) => data.Id === uniqueId);
+      const dragTypeValue = item?.text ? item.text : monitor.type;
+      const widgetWidth =
+        defaultWidthHeight(dragTypeValue).width * containerScale;
+      const widgetHeight =
+        defaultWidthHeight(dragTypeValue).height * containerScale;
+      const extUser = localStorage.getItem("Extand_Class");
+      let parseUser =
+        (extUser && JSON.parse(extUser)[0]) ||
+        JSON.parse(localStorage.getItem("signer"));
+
+      const widgetValue = widgetDataValue(dragTypeValue, parseUser);
+      //adding and updating drop position in array when user drop signature button in div
+      if (item === "onclick") {
+        // Use the current page container (id="container") so that the
+        // height reflects one page, not the entire multi-page document.
+        const containerEl =
+          document.getElementById("container") || divRef.current;
+        const divWidth = containerEl.getBoundingClientRect().width;
+        const divHeight = containerEl.getBoundingClientRect().height;
+        //  Compute the pixel‐space center within the PDF viewport:
+        const centerX_Pixels = divWidth / 2 - widgetWidth / 2;
+        const xPosition_Final = centerX_Pixels / (containerScale * scale);
+        dropObj = {
+          //onclick put placeholder center on pdf
+          xPosition: xPosition_Final,
+          yPosition:
+            (divHeight / 2 - widgetHeight / 2) / (containerScale * scale),
+          isStamp:
+            (dragTypeValue === "stamp" || dragTypeValue === "image") && true,
+          key: key,
+          scale: containerScale,
+          zIndex: posZIndex,
+          type: dragTypeValue,
+          options: addWidgetOptions(
+            dragTypeValue,
+            owner,
+            filterSignerPos?.placeHolder,
+            null,
+            widgetValue
+          ),
+          Width: widgetWidth / (containerScale * scale),
+          Height: widgetHeight / (containerScale * scale)
+        };
+        dropData.push(dropObj);
+        placeHolder = { pageNumber: pageNumber, pos: dropData };
+      } else {
+        const offset = monitor.getClientOffset();
+        //This method returns the offset of the current pointer (mouse) position relative to the client viewport.
+        const containerRect = document
+          .getElementById("container")
+          .getBoundingClientRect();
+        //`containerRect.left`,  The distance from the left of the viewport to the left side of the element.
+        //`containerRect.top` The distance from the top of the viewport to the top of the element.
+        const x = offset.x - containerRect.left;
+        const y = offset.y - containerRect.top;
+        let getXPosition = signBtnPosition[0] ? x - signBtnPosition[0].xPos : x;
+        let getYPosition = signBtnPosition[0] ? y - signBtnPosition[0].yPos : y;
+        // to avoid negative position values (half portion of widget should not be out of pdf container)
+        if (getXPosition < 0) {
+          getXPosition = 0;
+        }
+        if (getYPosition < 0) {
+          getYPosition = 0;
+        }
+
+        dropObj = {
+          xPosition: getXPosition / (containerScale * scale),
+          yPosition: getYPosition / (containerScale * scale),
+          isStamp:
+            (dragTypeValue === "stamp" || dragTypeValue === "image") && true,
+          key: key,
+          scale: containerScale,
+          zIndex: posZIndex,
+          type: dragTypeValue,
+          options: addWidgetOptions(
+            dragTypeValue,
+            owner,
+            filterSignerPos?.placeHolder,
+            null,
+            widgetValue
+          ),
+          Width: widgetWidth / (containerScale * scale),
+          Height: widgetHeight / (containerScale * scale)
+        };
+        dropData.push(dropObj);
+        placeHolder = { pageNumber: pageNumber, pos: dropData };
+      }
       const getPlaceHolder = filterSignerPos?.placeHolder;
       if (getPlaceHolder) {
         //checking exist placeholder on same page
@@ -1488,6 +1642,7 @@ function PdfRequestFiles(
         );
         const getPos = currentPagePosition?.pos;
         const newSignPos = getPos.concat(dropData);
+        newSignPos.sort((a, b) => a.yPosition - b.yPosition);
         let xyPos = { pageNumber: pageNumber, pos: newSignPos };
         updatePlace.push(xyPos);
         const updatesignerPos = signerPos.map((x) =>
@@ -1498,9 +1653,17 @@ function PdfRequestFiles(
         //else condition to add placeholder widgets on multiple page first time
         const updatesignerPos = signerPos.map((x) =>
           x.Id === uniqueId && x?.placeHolder
-            ? { ...x, placeHolder: [...x.placeHolder, placeHolder] }
+            ? {
+                ...x,
+                placeHolder: [...x.placeHolder, placeHolder].sort(
+                  (a, b) => a.pageNumber - b.pageNumber
+                )
+              }
             : x.Id === uniqueId
-              ? { ...x, placeHolder: [placeHolder] }
+              ? {
+                  ...x,
+                  placeHolder: [placeHolder]
+                }
               : x
         );
         setSignerPos(updatesignerPos);
@@ -1513,18 +1676,19 @@ function PdfRequestFiles(
         setFontSize(12);
         setFontColor("black");
       }
-      setCurrWidgetsDetails(dropObj);
+      setCurrWidgetsDetails({ ...dropObj, pageNumber: pageNumber });
     }
   };
 
   //function for delete signature block
-  const handleDeleteSign = (key, Id) => {
+  const handleDeleteWidget = (key, Id, widgetPageNumber) => {
+    const effectivePageNumber = widgetPageNumber || pageNumber;
     const updateData = [];
     const filterSignerPos = signerPos?.filter((data) => data.Id === Id);
     if (filterSignerPos.length > 0) {
       const getPlaceHolder = filterSignerPos[0].placeHolder;
       const getPageNumer = getPlaceHolder.filter(
-        (data) => data.pageNumber === pageNumber
+        (data) => data.pageNumber === effectivePageNumber
       );
       if (getPageNumer.length > 0) {
         const getXYdata = getPageNumer[0].pos.filter(
@@ -1534,7 +1698,7 @@ function PdfRequestFiles(
         if (getXYdata.length > 0) {
           updateData.push(getXYdata);
           const newUpdatePos = getPlaceHolder.map((obj) => {
-            if (obj.pageNumber === pageNumber) {
+            if (obj.pageNumber === effectivePageNumber) {
               return { ...obj, pos: updateData[0] };
             }
             return obj;
@@ -1549,7 +1713,7 @@ function PdfRequestFiles(
           setSignerPos(newUpdateSigner);
         } else {
           const getRemainPage = filterSignerPos[0]?.placeHolder?.filter(
-            (data) => data.pageNumber !== pageNumber
+            (data) => data.pageNumber !== effectivePageNumber
           );
           //condition to check placeholder length is greater than 1 do not need to remove whole placeholder
           //array only resove particular widgets
@@ -1580,9 +1744,9 @@ function PdfRequestFiles(
       }
     }
   };
-  //function to get first widget id and page number to assign correct signer and show tour message
+  //function to get first widget and page number to assign currect signer and tour message
   const showFirstWidget = () => {
-    if (!requestSignTour) {
+    if (!isReqSignTourDisabled) {
       const getCurrentUserPlaceholder = signerPos?.find(
         (x) => x.Id === uniqueId
       );
@@ -1604,13 +1768,43 @@ function PdfRequestFiles(
       setShowSignPagenumber(sortedPagenumber);
     }
   };
+
+  const RedirectNotice = () => {
+    return !isredirectCanceled && redirectUrl ? (
+      <div
+        className="flex flex-row gap-1 items-center justify-center mb-3"
+        aria-live="polite"
+      >
+        <p>{t("redirecting-you-in", { redirectTimeLeft })}</p>
+        <button
+          onClick={handleRedirectCancel}
+          className="underline cursor-pointer op-text-primary focus:outline-none ml-2"
+        >
+          {t("cancel")}
+        </button>
+      </div>
+    ) : (
+      <></>
+    );
+  };
+  const handleTourHelp = () => {
+    setIsReqSignTourDisabled(false);
+  };
+
+  const getSignerEmail = () => {
+    const isSignerAssigned = unsignedSigners[0]?.objectId;
+    let email = formData[0]?.email;
+    if (isSignerAssigned) {
+      email = unsignedSigners[0]?.Email;
+    }
+    return email;
+  };
+  const handleDownload = async () => {
+      setIsCompleted((prev) => ({ ...prev, isModal: false }));
+      setIsDownloadModal(true);
+  };
   return (
-    <DndProvider backend={HTML5Backend}>
-      <Title
-        title={
-              "Request Sign"
-        }
-      />
+    <>
           {isLoading.isLoad ? (
             <LoaderWithMsg isLoading={isLoading} />
           ) : handleError ? (
@@ -1622,20 +1816,13 @@ function PdfRequestFiles(
                 !isExpired &&
                 !alreadySign &&
                 !isCompleted?.isCertificate &&
-                !isDecline?.isDeclined && (
+                !isDecline?.isDeclined &&
+                  (
                   <AgreementSign
                     setIsAgree={setIsAgree}
                     showFirstWidget={showFirstWidget}
                   />
                 )}
-              {isUiLoading && (
-                <div className="absolute h-[100vh] w-full flex flex-col justify-center items-center z-[999] bg-[#e6f2f2] bg-opacity-80">
-                  <Loader />
-                  <span className="text-[13px] text-base-content">
-                    {t("loading-mssg")}
-                  </span>
-                </div>
-              )}
               {isCelebration && (
                 <div className="relative z-[1000]">
                   <Confetti
@@ -1660,20 +1847,25 @@ function PdfRequestFiles(
                       : "op-card"
                 } relative overflow-hidden flex flex-col md:flex-row justify-between bg-base-300`}
               >
-                {!requestSignTour &&
+                {isUiLoading && (
+                  <div className="absolute h-full w-full flex flex-col justify-center items-center z-[999] bg-[#e6f2f2]/80">
+                    <Loader />
+                    <span className="text-[13px]">{t("loading-mssg")}</span>
+                  </div>
+                )}
+                {!isReqSignTourDisabled &&
                   isAgree &&
                   signerObjectId &&
                   !alreadySign &&
                   requestSignTourFunction()}
                 <Tour
+                  key={`tour-min-required-${minRequiredCount || 0}`}
                   showNumber={false}
                   showNavigation={false}
                   showNavigationNumber={false}
                   onRequestClose={closeTour}
                   steps={tourConfig}
                   isOpen={widgetsTour}
-                  rounded={5}
-                  closeWithMask={false}
                 />
 
                 {/* this modal is used to show decline alert */}
@@ -1759,14 +1951,15 @@ function PdfRequestFiles(
                   signedUrl={pdfDetails?.[0]?.SignedUrl || ""}
                 />
                 {/* pdf render view */}
-                <div className=" w-full md:w-[57%] flex mr-4">
-                  <PdfZoom
+                <div className="w-full md:w-[57%] flex mr-4">
+                  <PdfTools
                     clickOnZoomIn={clickOnZoomIn}
                     clickOnZoomOut={clickOnZoomOut}
                     isDisableEditTools={true}
                     allPages={allPages}
                     setAllPages={setAllPages}
                     setPageNumber={setPageNumber}
+                    setIsTour={() => setIsReqSignTourDisabled(true)}
                   />
                   <PlaceholderCopy
                     isPageCopy={isPageCopy}
@@ -1774,13 +1967,12 @@ function PdfRequestFiles(
                     xyPosition={signerPos}
                     setXyPosition={setSignerPos}
                     allPages={allPages}
-                    pageNumber={pageNumber}
+                    pageNumber={currWidgetsDetails?.pageNumber || pageNumber}
                     signKey={currWidgetsDetails?.key}
                     Id={uniqueId}
                     widgetType={currWidgetsDetails?.type}
                     setUniqueId={setUniqueId}
-                    tempSignerId={tempSignerId}
-                    setTempSignerId={setTempSignerId}
+                    pdfOriginalWH={pdfOriginalWH}
                   />
                   <div className=" w-full md:w-[95%] ">
                     {/* this modal is used show this document is already sign */}
@@ -1798,20 +1990,8 @@ function PdfRequestFiles(
                       <div className="h-full p-[20px] text-base-content">
                         {isCompleted?.message ? (
                           <>
-                            <p>{isCompleted?.message}</p>
-                            {!isredirectCanceled && redirectUrl && (
-                              <div className="flex flex-row gap-1 items-center justify-center mb-3 mt-2">
-                                <p>
-                                  Redirecting you in {redirectTimeLeft} sec...
-                                </p>
-                                <button
-                                  onClick={handleRedirectCancel}
-                                  className="underline cursor-pointer op-text-primary focus:outline-none ml-2"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            )}
+                            <p className="mb-2">{isCompleted?.message}</p>
+                            <RedirectNotice />
                           </>
                         ) : (
                           <div className="px-[15px]">
@@ -1820,19 +2000,7 @@ function PdfRequestFiles(
                         )}
                         {!isCompleted?.message && (
                           <div className="flex flex-col mt-3 gap-1 px-[10px] justify-center items-center">
-                            {!isredirectCanceled && redirectUrl && (
-                              <div className="flex flex-row gap-1 items-center justify-center mb-3">
-                                <p>
-                                  Redirecting you in {redirectTimeLeft} sec...
-                                </p>
-                                <button
-                                  onClick={handleRedirectCancel}
-                                  className="underline cursor-pointer op-text-primary focus:outline-none ml-2"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            )}
+                            <RedirectNotice />
                             <div className={`${!redirectUrl ? "m-2" : ""}`}>
                               <button
                                 onClick={(e) =>
@@ -1849,34 +2017,28 @@ function PdfRequestFiles(
                                   {t("print")}
                                 </span>
                               </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleDownloadCertificate(
-                                    pdfDetails,
-                                    setIsDownloading
-                                  )
-                                }
-                                className="font-[500] text-[13px] mr-[5px] op-btn op-btn-secondary"
-                              >
-                                <i
-                                  className="fa-light fa-award mx-[3px] lg:mx-0"
-                                  aria-hidden="true"
-                                ></i>
-                                <span className="hidden lg:block">
-                                  {t("certificate")}
-                                </span>
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleDownloadCertificate(
+                                      pdfDetails,
+                                      setIsDownloading
+                                    )
+                                  }
+                                  className="font-[500] text-[13px] mr-[5px] op-btn op-btn-secondary"
+                                >
+                                  <i
+                                    className="fa-light fa-award mx-[3px] lg:mx-0"
+                                    aria-hidden="true"
+                                  ></i>
+                                  <span className="hidden lg:block">
+                                    {t("certificate")}
+                                  </span>
+                                </button>
                               <button
                                 type="button"
                                 className="font-[500] text-[13px] mr-[5px] op-btn op-btn-primary"
-                                onClick={() => {
-                                  setIsCompleted((prev) => ({
-                                    ...prev,
-                                    isModal: false
-                                  }));
-                                  setIsDownloadModal(true);
-                                }}
+                                onClick={handleDownload}
                               >
                                 <i
                                   className="fa-light fa-download"
@@ -1945,17 +2107,17 @@ function PdfRequestFiles(
                       pdfBase64={pdfBase64Url}
                       isGuestSignFlow={isGuestSignFlow}
                     />
-
                     <div
                       ref={divRef}
                       data-tut="pdfArea"
-                      className="h-full md:h-[95%]"
+                      className="h-fit"
+                      onClick={() => setIsReqSignTourDisabled(true)}
                     >
-                      {containerWH && (
+                      {containerWH?.width && (
                         <RenderPdf
                           setIsPageCopy={setIsPageCopy}
-                          drop={drop}
                           pageNumber={pageNumber}
+                          setPageNumber={setPageNumber}
                           pdfOriginalWH={pdfOriginalWH}
                           pdfNewWidth={pdfNewWidth}
                           pdfDetails={pdfDetails}
@@ -1980,17 +2142,21 @@ function PdfRequestFiles(
                           scale={scale}
                           uniqueId={uniqueId}
                           pdfBase64Url={pdfBase64Url}
+                          isAgree={isAgree}
                           handleTabDrag={handleTabDrag}
                           handleStop={handleStop}
                           isDragging={isDragging}
                           isAlllowModify={pdfDetails[0]?.AllowModifications}
                           setUniqueId={setUniqueId}
-                          handleDeleteSign={handleDeleteSign}
+                          handleDeleteWidget={handleDeleteWidget}
                           handleTextSettingModal={handleTextSettingModal}
                           assignedWidgetId={assignedWidgetId}
-                          setRequestSignTour={setRequestSignTour}
+                          setIsReqSignTourDisabled={handleCloseTour}
                           currWidgetsDetails={currWidgetsDetails}
-                          setTempSignerId={setTempSignerId}
+                          isShowModal={isShowModal}
+                          signBtnPosition={signBtnPosition}
+                          addPositionOfSignature={addPositionOfSignature}
+                          closeWidgetTour={closeTour}
                         />
                       )}
                     </div>
@@ -2015,7 +2181,6 @@ function PdfRequestFiles(
                                   <SignerListComponent
                                     ind={ind}
                                     obj={obj}
-                                    isMenu={isHeader}
                                     signerPos={signerPos}
                                   />
                                 </div>
@@ -2025,30 +2190,35 @@ function PdfRequestFiles(
                         </>
                       )}
 
-                      {unsignedSigners.length > 0 && (
-                        <>
-                          <div
-                            data-tut="reactourFirst"
-                            className="mx-2 pr-2 pt-2 pb-1 text-[15px] text-base-content font-semibold border-b-[1px] border-base-300"
-                          >
-                            <span>{t("yet-to-sign")}</span>
-                          </div>
-                          <div className="mt-[5px]">
-                            {unsignedSigners.map((obj, ind) => {
-                              return (
-                                <div key={ind}>
-                                  <SignerListComponent
-                                    ind={ind}
-                                    obj={obj}
-                                    isMenu={isHeader}
-                                    signerPos={signerPos}
-                                  />
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </>
-                      )}
+                      {unsignedSigners.length > 0 &&
+                        (() => {
+                          return (
+                            <>
+                              <div className="mx-2 pr-2 pt-2 pb-1 text-[15px] text-base-content font-semibold border-b-[1px] border-base-300">
+                                <span>
+                                  {t("yet-to-sign")}
+                                  <sup onClick={handleTourHelp}>
+                                    <i className="ml-1 cursor-pointer fa-light fa-question rounded-full border-[1px] border-base-content text-[11px] py-[1px] px-[3px]"></i>
+                                  </sup>
+                                </span>
+                              </div>
+                              <div
+                                data-tut="reactourFirst"
+                                className="mt-[5px]"
+                              >
+                                {unsignedSigners.map((obj, ind) => (
+                                  <div key={ind}>
+                                    <SignerListComponent
+                                      ind={ind}
+                                      obj={obj}
+                                      signerPos={signerPos}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
                       {(defaultSignImg || myInitial) &&
                         !alreadySign &&
                         currentSigner && (
@@ -2062,12 +2232,14 @@ function PdfRequestFiles(
                               signatureType?.find((x) => x.name === "default")
                                 ?.enabled || false
                             }
+                            isAgree={isAgree}
                           />
                         )}
                     </div>
                     {pdfDetails[0]?.AllowModifications &&
                       currentSigner &&
-                      !alreadySign && (
+                      !alreadySign &&
+                        (
                         <div data-tut="reactourFourth">
                           <WidgetComponent
                             pdfUrl={pdfUrl}
@@ -2095,11 +2267,11 @@ function PdfRequestFiles(
               finishDocument={handleSignPdf}
               setCurrWidgetsDetails={setCurrWidgetsDetails}
               currWidgetsDetails={currWidgetsDetails}
-              index={pageNumber}
+              index={currWidgetsDetails?.pageNumber || pageNumber}
               setUniqueId={setUniqueId}
-              tempSignerId={tempSignerId}
               signatureTypes={signatureType}
-              allowCellResize={pdfDetails[0]?.AllowModifications ?? false}
+              allowCellResize={false}
+              penColors={pdfDetails?.[0]?.PenColors}
             />
           )}
           <DownloadPdfZip
@@ -2135,7 +2307,7 @@ function PdfRequestFiles(
             handleSaveFontSize={handleSaveFontSize}
             currWidgetsDetails={currWidgetsDetails}
           />
-    </DndProvider>
+    </>
   );
 }
 export default PdfRequestFiles;

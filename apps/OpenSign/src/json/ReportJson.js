@@ -1,9 +1,18 @@
+export const extraCols = [
+  "Note",
+  "Time to complete (Days)",
+  "Enable Tour",
+  "Notify on signatures",
+  "Redirect url",
+  "Created Date",
+  "Updated Date"
+];
+
 export default function reportJson(id) {
-  // console.log("json ", json);
   const head = ["Title", "Note", "Folder", "File", "Owner", "Signers"];
   const declineHead = ["Title", "Reason", "Folder", "File", "Owner", "Signers"];
-  const iphead = ["Title", "Note", "Folder", "File", "Signers"];
-  const contactbook = ["Name", "Email", "Phone"];
+  const iphead = ["Title", "Note", "Folder", "File", "Signers", "Sent Date"];
+  const contactbook = ["Name", "Email", "Phone", "Company", "JobTitle"];
   const dashboardReportHead = ["Title", "File", "Owner", "Signers"];
   const templateReport = ["Title", "File", "Owner", "Signers"];
   switch (id) {
@@ -28,25 +37,6 @@ export default function reportJson(id) {
             btnIcon: "fa-light fa-trash",
             redirectUrl: "",
             action: "delete"
-          },
-          {
-            btnId: "22534",
-            hoverLabel: "option",
-            btnColor: "",
-            restrictBtn: true,
-            textColor: "black",
-            btnIcon: "fa-light fa-ellipsis-vertical fa-lg",
-            action: "option",
-            subaction: [
-              {
-                btnId: "1630",
-                btnLabel: "Save as template",
-                hoverLabel: "Save as template",
-                btnIcon: "fa-light fa-envelope",
-                redirectUrl: "",
-                action: "saveastemplate"
-              }
-            ]
           }
         ],
         helpMsg:
@@ -81,7 +71,7 @@ export default function reportJson(id) {
             btnId: "8901",
             hoverLabel: "Share",
             btnColor: "op-btn-primary",
-            btnIcon: "fa-light fa-share",
+            btnIcon: "fa-light fa-copy",
             redirectUrl: "",
             action: "share"
           },
@@ -116,6 +106,14 @@ export default function reportJson(id) {
                 btnIcon: "fa-light fa-pen-to-square",
                 redirectUrl: "",
                 action: "rename"
+              },
+              {
+                btnId: "1634",
+                btnLabel: "extend-expiry-date",
+                hoverLabel: "Extend expiry date",
+                btnIcon: "fa-light fa-hourglass-end",
+                redirectUrl: "",
+                action: "extendexpiry"
               },
               {
                 btnId: "1688",
@@ -317,7 +315,7 @@ export default function reportJson(id) {
             btnId: "1999",
             hoverLabel: "Share",
             btnColor: "op-btn-primary",
-            btnIcon: "fa-light fa-share",
+            btnIcon: "fa-light fa-copy",
             redirectUrl: "",
             action: "share"
           },
@@ -419,25 +417,6 @@ export default function reportJson(id) {
             btnIcon: "fa-light fa-trash",
             redirectUrl: "",
             action: "delete"
-          },
-          {
-            btnId: "55534",
-            hoverLabel: "option",
-            btnColor: "",
-            restrictBtn: true,
-            textColor: "black",
-            btnIcon: "fa-light fa-ellipsis-vertical fa-lg",
-            action: "option",
-            subaction: [
-              {
-                btnId: "6630",
-                btnLabel: "Save as template",
-                hoverLabel: "Save as template",
-                btnIcon: "fa-light fa-envelope",
-                redirectUrl: "",
-                action: "saveastemplate"
-              }
-            ]
           }
         ]
       };
@@ -462,8 +441,6 @@ export default function reportJson(id) {
             action: "delete"
           }
         ],
-        import: true,
-        form: "ContactBook",
         helpMsg:
           "This is a list of contacts/signers added by you. These will appear as suggestions when you try to add signers to a new document."
       };
@@ -564,3 +541,23 @@ export default function reportJson(id) {
       return null;
   }
 }
+
+export const usersActions = [
+  {
+    btnId: "4741",
+    hoverLabel: "Delete",
+    btnColor: "op-btn-secondary",
+    btnIcon: "fa-light fa-trash",
+    redirectUrl: "",
+    action: "delete",
+    restrictAdmin: true
+  },
+  {
+    btnId: "1910",
+    hoverLabel: "Reset password",
+    btnIcon: "fa-light fa-key",
+    redirectUrl: "",
+    action: "resetpassword",
+    restrictAdmin: true
+  }
+];

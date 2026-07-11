@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ quiet: true });
 import express from 'express';
 import cors from 'cors';
 import { ParseServer } from 'parse-server';
@@ -11,20 +11,21 @@ import Mailgun from 'mailgun.js';
 import { ApiPayloadConverter } from 'parse-server-api-mail-adapter';
 import S3Adapter from '@parse/s3-files-adapter';
 import FSFilesAdapter from '@parse/fs-files-adapter';
-import AWS from 'aws-sdk';
 import { app as customRoute } from './cloud/customRoute/customApp.js';
 import { exec } from 'child_process';
 import { createTransport } from 'nodemailer';
 import { appName, cloudServerUrl, serverAppId, smtpenable, smtpsecure, useLocal } from './Utils.js';
 import { SSOAuth } from './auth/authadapter.js';
-import createContactIndex from './migrationdb/createContactIndex.js';
+import runDbMigrations from './migrationdb/index.js';
 import { validateSignedLocalUrl } from './cloud/parsefunction/getSignedUrl.js';
-import maintenance_mode_message from 'aws-sdk/lib/maintenance_mode_message.js';
 let fsAdapter;
-maintenance_mode_message.suppress = true;
+
 if (useLocal !== 'true') {
   try {
-    const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT);
+    // const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT);
+    const spacesEndpoint = process.env.DO_ENDPOINT?.includes('http')
+      ? process.env.DO_ENDPOINT
+      : `https://${process.env.DO_ENDPOINT}`; //"e.g https://blr1.digitaloceanspaces.com"
     const s3Options = {
       bucket: process.env.DO_SPACE,
       baseUrl: process.env.DO_BASEURL,
@@ -40,6 +41,7 @@ if (useLocal !== 'true') {
           secretAccessKey: process.env.DO_SECRET_ACCESS_KEY,
         },
         endpoint: spacesEndpoint,
+        signatureVersion: 'v4',
       },
     };
     fsAdapter = new S3Adapter(s3Options);
@@ -61,20 +63,28 @@ let mailgunDomain;
 let isMailAdapter = false;
 if (smtpenable) {
   try {
-    transporterMail = createTransport({
+    let transporterConfig = {
       host: process.env.SMTP_HOST,
       port: process.env.SMTP_PORT || 465,
       secure: smtpsecure,
-      auth: {
+    };
+
+    // ✅ Add auth only if BOTH username & password exist
+    const smtpUser = process.env.SMTP_USERNAME;
+    const smtpPass = process.env.SMTP_PASS;
+
+    if (smtpUser && smtpPass) {
+      transporterConfig.auth = {
         user: process.env.SMTP_USERNAME ? process.env.SMTP_USERNAME : process.env.SMTP_USER_EMAIL,
-        pass: process.env.SMTP_PASS,
-      },
-    });
+        pass: smtpPass,
+      };
+    }
+    transporterMail = createTransport(transporterConfig);
     await transporterMail.verify();
     isMailAdapter = true;
   } catch (err) {
     isMailAdapter = false;
-    console.log('Please provide valid SMTP credentials');
+    console.log(`Please provide valid SMTP credentials: ${err}`);
   }
 } else if (process.env.MAILGUN_API_KEY) {
   try {
@@ -100,7 +110,7 @@ export const config = {
   appId: serverAppId,
   logLevel: ['error'],
   maxLimit: 500,
-  maxUploadSize: '30mb',
+  maxUploadSize: '100mb',
   masterKey: process.env.MASTER_KEY, //Add your master key here. Keep it secret!
   masterKeyIps: ['0.0.0.0/0', '::/0'], // '::1'
   serverURL: cloudServerUrl, // Don't forget to change to https if needed
@@ -110,6 +120,8 @@ export const config = {
   appName: appName,
   allowClientClassCreation: false,
   allowExpiredAuthDataToken: false,
+  enableInsecureAuthAdapters: false,
+  databaseOptions: { allowPublicExplain: false },
   encodeParseObjectInCloudFunction: true,
   ...(isMailAdapter === true
     ? {
@@ -146,7 +158,7 @@ export const config = {
       }
     : {}),
   filesAdapter: fsAdapter,
-  auth: { google: { enabled: true }, sso: SSOAuth },
+  auth: { google: { clientId: process.env.GOOGLE_CLIENT_ID }, sso: SSOAuth },
   // for fix Adapter prototype don't match expected prototype
   push: { queueOptions: { disablePushWorker: true } },
 };
@@ -156,8 +168,8 @@ export const config = {
 
 export const app = express();
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(function (req, res, next) {
   req.headers['x-real-ip'] = getUserIP(req);
   const publicUrl = 'https://' + req?.get('host');
@@ -178,7 +190,7 @@ function getUserIP(request) {
 }
 
 app.use(async function (req, res, next) {
-  const isFilePath = req.path.includes('files') || false;
+  const isFilePath = req.path?.includes('/files/') || false;
   if (isFilePath && req.method.toLowerCase() === 'get') {
     const serverUrl = new URL(process.env.SERVER_URL);
     const origin = serverUrl.pathname === '/api/app' ? serverUrl.origin + '/api' : serverUrl.origin;
@@ -231,7 +243,7 @@ if (!process.env.TESTING) {
     console.log('opensign-server running on port ' + port + '.');
     const isWindows = process.platform === 'win32';
     // console.log('isWindows', isWindows);
-    createContactIndex();
+    runDbMigrations();
     const migrate = isWindows
       ? `set APPLICATION_ID=${serverAppId}&& set SERVER_URL=${cloudServerUrl}&& set MASTER_KEY=${process.env.MASTER_KEY}&& npx parse-dbtool migrate`
       : `APPLICATION_ID=${serverAppId} SERVER_URL=${cloudServerUrl} MASTER_KEY=${process.env.MASTER_KEY} npx parse-dbtool migrate`;

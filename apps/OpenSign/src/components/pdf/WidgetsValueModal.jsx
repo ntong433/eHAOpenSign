@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import ModalUi from "../../primitives/ModalUi";
 import { useTranslation } from "react-i18next";
 import { removeBackground } from "@imgly/background-removal";
@@ -19,49 +19,50 @@ import {
   textWidget,
   years,
   convertTextToImg,
-  convertJpegToPng
+  convertJpegToPng,
+  convertBase64ToFile,
+  generatePdfName,
+  getDefaultDate,
+  getDefaultFormat,
+  getBase64MimeType,
+  drawWidget,
+  getBase64FromUrl,
+  clearResponse,
+  isEmptyValue
 } from "../../constant/Utils";
-import CellsWidget from "./CellsWidget";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import SignatureCanvas from "react-signature-canvas";
-import Parse from "parse";
-import {
-  generateTitleFromFilename,
-  getBase64FromUrl,
-  getSecureUrl
-} from "../../constant/Utils";
-import sanitizeFileName from "../../primitives/sanitizeFileName";
-import { SaveFileSize } from "../../constant/saveFileSize";
 import moment from "moment";
 import {
   setSaveSignCheckbox,
   setDefaultSignImg,
   setIsShowModal,
   setMyInitial,
-  setLastIndex
+  setLastIndex,
+  setScrollTriggerId,
+  setPrefillImg,
+  setPrefillImgLoad,
+  setSignatureRes,
+  setTypedSignFont,
+  setMyStamp
 } from "../../redux/reducers/widgetSlice";
 import { useDispatch, useSelector } from "react-redux";
 import Loader from "../../primitives/Loader";
 import { emailRegex } from "../../constant/const";
 import RegexParser from "regex-parser";
+import {
+  saveToMySign,
+  getInitials,
+  isValidBase64
+} from "../../utils";
+import Draw from "./tab/Draw";
+import DefaultSignature from "./tab/DefaultSignature";
+import UploadImage from "./tab/UploadImage";
+import TypeSignature from "./tab/TypeSignature";
+import PenColorComponent from "./tab/PenColorComponent";
+import TextInput from "./widgets/TextInput";
+import CellsInput from "./widgets/CellsInput";
 
-//function to get default format
-const getDefaultFormat = (dateFormat) => dateFormat || "MM/dd/yyyy";
-//function to convert formatted date to new Date() format
-const getDefaultDate = (dateStr, format) => {
-  //get valid date format for moment to convert formatted date to new Date() format
-  const formats = changeDateToMomentFormat(format);
-  const parsedDate = moment(dateStr, formats);
-  let date;
-  if (parsedDate.isValid()) {
-    date = new Date(parsedDate.toISOString());
-    return date;
-  } else {
-    date = new Date();
-    return date;
-  }
-};
 const fontOptions = [
   { value: "Fasthand" },
   { value: "Dancing Script" },
@@ -69,22 +70,24 @@ const fontOptions = [
   { value: "Delicious Handrawn" }
   // Add more font options as needed
 ];
-const allColor = ["blue", "red", "black"];
 const textInputcls =
   "op-input op-input-bordered op-input-sm focus:outline-none text-base-content hover:border-base-content w-full text-xs";
 const isTabCls = "bg-[#002864] text-white rounded-[15px] px-[10px] py-[4px]";
 
 function WidgetsValueModal(props) {
   const dispatch = useDispatch();
-  const saveSignCheckbox = useSelector(
-    (state) => state.widget.saveSignCheckbox
-  );
-  const defaultSignImg = useSelector((state) => state.widget.defaultSignImg);
-  const myInitial = useSelector((state) => state.widget.myInitial);
-  const lastWidget = useSelector((state) => state.widget.lastIndex);
+  const {
+    signatureResponse,
+    prefillImg,
+    defaultSignImg,
+    myInitial,
+    lastIndex: lastWidget,
+    typedSignFont,
+    saveSignCheckbox: mysign,
+    myStamp
+  } = useSelector((state) => state.widget);
   const { t } = useTranslation();
   const canvasRef = useRef(null);
-  const imageRef = useRef(null);
   const {
     xyPosition,
     uniqueId,
@@ -92,26 +95,29 @@ function WidgetsValueModal(props) {
     currWidgetsDetails,
     setXyPosition,
     isSave,
-    setUniqueId,
-    tempSignerId,
     signatureTypes,
-    setCellCount,
-    allowCellResize = true
+    penColors
   } = props;
-  const [penColor, setPenColor] = useState("blue");
+  const previousWidgetRes = signatureResponse?.find(
+    (item) => item.type === currWidgetsDetails?.type
+  );
+  const [penColor, setPenColor] = useState("");
   const [isOptional, setIsOptional] = useState(true);
-  const [isDefaultSign, setIsDefaultSign] = useState(false);
   const [isTab, setIsTab] = useState("");
   const [textWidth, setTextWidth] = useState(0);
   const [textHeight, setTextHeight] = useState(0);
   const [isSignTypes, setIsSignTypes] = useState(true);
-  const [typedSignature, setTypedSignature] = useState("");
+  const [typedSignature, setTypedSignature] = useState(
+    previousWidgetRes?.value || ""
+  );
   const [selectDate, setSelectDate] = useState({});
   const [isLastWidget, setIsLastWidget] = useState(false);
   const [signature, setSignature] = useState();
   const [isImageSelect, setIsImageSelect] = useState(false);
   const [isFinish, setIsFinish] = useState(false);
-  const [fontSelect, setFontSelect] = useState(fontOptions[0].value);
+  const [fontSelect, setFontSelect] = useState(
+    previousWidgetRes?.font || fontOptions[0].value
+  );
   const [isSavedSign, setIsSavedSign] = useState(false);
   const [isAutoSign, setIsAutoSign] = useState(false);
   const [image, setImage] = useState(null);
@@ -120,45 +126,6 @@ function WidgetsValueModal(props) {
   const [isShowValidation, setIsShowValidation] = useState(false);
   const [removeBgEnabled, setRemoveBgEnabled] = useState(false);
   const [originalImage, setOriginalImage] = useState(null);
-  const accesstoken = localStorage.getItem("accesstoken") || "";
-  const senderUser = localStorage.getItem(
-    `Parse/${localStorage.getItem("parseAppId")}/currentUser`
-  );
-  const jsonSender = senderUser && JSON.parse(senderUser);
-  const currentUserName = jsonSender && jsonSender?.name;
-  const widgetTypeTranslation = t(`widgets-name.${currWidgetsDetails?.type}`);
-  const [widgetValue, setWidgetValue] = useState(
-    currWidgetsDetails.type !== "checkbox" &&
-      (currWidgetsDetails?.options?.response ||
-        currWidgetsDetails?.options?.defaultValue)
-  );
-  const [cellsValue, setCellsValue] = useState(() => {
-    const count = currWidgetsDetails?.options?.cellCount || 5;
-    const val =
-      currWidgetsDetails?.options?.response ||
-      currWidgetsDetails?.options?.defaultValue ||
-      "";
-    return Array.from({ length: count }, (_, i) => val[i] || "");
-  });
-  const cellRefs = useRef([]);
-  // keep track of the first empty cell to automatically focus it after updates
-  useEffect(() => {
-    const index = cellsValue.findIndex((v) => !v);
-    if (index !== -1) {
-      setTimeout(() => {
-        cellRefs.current[index]?.focus();
-      }, 0);
-    }
-  }, [cellsValue]);
-
-  useEffect(() => {
-    const count = currWidgetsDetails?.options?.cellCount || 5;
-    const val =
-      currWidgetsDetails?.options?.response ||
-      currWidgetsDetails?.options?.defaultValue ||
-      "";
-    setCellsValue(Array.from({ length: count }, (_, i) => val[i] || ""));
-  }, [currWidgetsDetails?.key, currWidgetsDetails?.options?.cellCount]);
   const [selectedCheckbox, setSelectedCheckbox] = useState(
     currWidgetsDetails.type === "checkbox" &&
       (currWidgetsDetails?.options?.response ||
@@ -171,14 +138,82 @@ function WidgetsValueModal(props) {
           currWidgetsDetails?.options?.response,
           currWidgetsDetails?.options?.validation?.format
         )
-      : new Date()
+      : ""
   );
+  const accesstoken = localStorage.getItem("accesstoken") || "";
+  const senderUser = localStorage.getItem(
+    `Parse/${localStorage.getItem("parseAppId")}/currentUser`
+  );
+  const kiosk_signer =
+    props?.kiosk_signer || JSON.parse(localStorage.getItem("kiosk_signer"));
+  const jsonSender = senderUser && JSON.parse(senderUser);
+  const currentUserName = jsonSender && jsonSender?.name;
+  const type = currWidgetsDetails?.type;
+  const widgetTypeTranslation = t(`widgets-name.${currWidgetsDetails?.type}`);
+
+  const getLogicMap = () => new Map();
+
+
+  const [widgetValue, setWidgetValue] = useState(() => {
+    if (currWidgetsDetails.type === "checkbox") {
+      return undefined;
+    }
+    return (
+      currWidgetsDetails?.options?.response ||
+      currWidgetsDetails?.options?.defaultValue
+    );
+  });
+  const blocked = [
+  ];
+  const blockedTab = ["mysignature", "myinitials", "myStamp"];
+  const showClearbtn =
+    (!blocked.includes(type) && !blockedTab.includes(isTab));
+  const isSignOrInitials = ["signature", "initials"].includes(
+    currWidgetsDetails?.type
+  );
+  const isImageOrStamp = ["image", "stamp"].includes(currWidgetsDetails?.type);
+  const widgetRef = useRef(null);
+  useEffect(() => {
+    const val =
+      currWidgetsDetails?.options?.response ||
+      currWidgetsDetails?.options?.defaultValue ||
+      "";
+    setWidgetValue(String(val || ""));
+  }, [currWidgetsDetails?.key, currWidgetsDetails?.options?.cellCount]);
+  useEffect(() => {
+    dispatch(setScrollTriggerId(currWidgetsDetails?.key));
+    handlePenColor();
+    return () => dispatch(setScrollTriggerId());
+  }, []);
+
+  const handlePenColor = () => {
+    if (penColors && Array.isArray(penColors) && penColors?.length > 0) {
+      setPenColor(penColors?.[0] || "blue");
+    } else {
+      setPenColor("blue");
+    }
+  };
+  // below useEffect is used to focus text widgets when user open modal
+  useEffect(() => {
+    if (widgetRef?.current) {
+      const clearFocus = setTimeout(
+        () => widgetRef?.current.focus({ preventScroll: true }),
+        10
+      );
+      return () => clearTimeout(clearFocus);
+    }
+  }, [widgetRef.current]);
 
   useEffect(() => {
     if (
-      ["name", "email", "job title", "company", textInputWidget].includes(
-        currWidgetsDetails?.type
-      )
+      [
+        "name",
+        "email",
+        "job title",
+        "company",
+        textInputWidget,
+        cellsWidget
+      ].includes(currWidgetsDetails?.type)
     ) {
       if (currWidgetsDetails?.options?.hint) {
         setHint(currWidgetsDetails?.options.hint);
@@ -190,8 +225,14 @@ function WidgetsValueModal(props) {
       } else {
         setHint(currWidgetsDetails?.type);
       }
-    } else if (["signature", "initials"].includes(currWidgetsDetails?.type)) {
-      setIsTab(currWidgetsDetails?.signatureType);
+    }
+
+    else if (currWidgetsDetails?.type === "date") {
+      setHint(currWidgetsDetails?.options.hint || "");
+    } else if (isSignOrInitials) {
+      if (currWidgetsDetails?.signatureType) {
+        setIsTab(currWidgetsDetails?.signatureType);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currWidgetsDetails]); // Added currWidgetsDetails to dependency array for reset logic
@@ -234,15 +275,17 @@ function WidgetsValueModal(props) {
     //`onChangeInput` is used to save data related to date in a placeholder field
     onChangeInput(
       date,
-      currWidgetsDetails?.key,
+      currWidgetsDetails,
       xyPosition,
       props.index,
       setXyPosition,
       uniqueId,
       false,
       data?.format,
-      currWidgetsDetails?.options?.fontSize || 12,
-      currWidgetsDetails?.options?.fontColor || "black"
+      currWidgetsDetails?.options?.fontSize,
+      currWidgetsDetails?.options?.fontColor,
+      null,
+      null,
     );
     setSelectDate({ date: date, format: data?.format });
   };
@@ -251,7 +294,7 @@ function WidgetsValueModal(props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signatureTypes]);
   //function for image upload or update
-  const onImageChange = (event) => {
+  const onImageChange = async (event) => {
     if (event.target.files && event.target.files[0]) {
       const file = event.target.files[0];
       setOriginalImage(null); // Reset original image when a new file is selected
@@ -260,22 +303,56 @@ function WidgetsValueModal(props) {
       compressedFileSize(file, setImage);
     }
   };
+  const handleSavePrefillImg = async (drawImg) => {
+    setIsLoader(true);
+
+    try {
+      dispatch(
+        setPrefillImg({
+          id: currWidgetsDetails?.key,
+          base64: drawImg || image?.src
+        })
+      );
+      const imageName = generatePdfName(16);
+
+      const imgType = image?.imgType || getBase64MimeType(drawImg);
+      const imageUrl = await convertBase64ToFile(
+        imageName,
+        drawImg || image.src,
+        imgType
+      );
+      setIsLoader(false);
+      if (imageUrl) {
+        return imageUrl;
+      }
+    } catch (e) {
+      console.log("error in handleSavePrefillImg function ", e);
+    }
+  };
   //function is used to save image,stamp widgets data
-  const handleSaveImage = (signatureType) => {
+  const handleSaveImage = async (signatureType) => {
     const widgetsType = currWidgetsDetails?.type;
-    //`isApplyAll` is used when user edit stamp then updated signature apply all existing drawn signatures
-    const isApplyAll = true;
+    let imgUrl;
+    const isPrefill = xyPosition.some(
+      (x) => x.Id === uniqueId && x?.Role === "prefill"
+    );
+    if (isPrefill) {
+      dispatch(setPrefillImgLoad({ [currWidgetsDetails?.key]: true }));
+      imgUrl = await handleSavePrefillImg();
+    }
+    const defaultStampImg =
+      myStamp && (await convertJpegToPng(myStamp, "mystamp")); // default signature set through my signature tab
+    const defaultStampType = myStamp && getBase64MimeType(myStamp);
     //check condition signyour-self or other flow
     if (uniqueId) {
       setXyPosition((prev) =>
         prev.map((signer) => {
           if (signer.Id !== uniqueId) return signer;
 
-          // Find the placeholder index for current page
-          const index = signer.placeHolder.findIndex(
-            (x) => x.pageNumber === pageNumber
+          // Find the placeholder index for the page containing the current widget
+          const index = signer.placeHolder.findIndex((x) =>
+            x.pos?.some((p) => p.key === currWidgetsDetails?.key)
           );
-
           // Get updated placeholder list
           const updatedPlaceholders = onSaveImage(
             signatureType,
@@ -285,7 +362,9 @@ function WidgetsValueModal(props) {
             image,
             isAutoSign,
             widgetsType,
-            isApplyAll
+            isPrefill && imgUrl,
+            defaultStampImg,
+            defaultStampType
           );
 
           return {
@@ -294,10 +373,28 @@ function WidgetsValueModal(props) {
           };
         })
       );
+      dispatch(setPrefillImgLoad({}));
+
+      if (
+        ["image", "myStamp", "uploadStamp"].includes(isTab) &&
+        ["signature", "initials", "stamp"].includes(currWidgetsDetails?.type)
+      ) {
+        if (defaultStampImg || image?.src) {
+          dispatch(
+            setSignatureRes({
+              tab: isTab,
+              value: isTab === "myStamp" ? defaultStampImg : image?.src,
+              imageType:
+                isTab === "myStamp" ? defaultStampType : image?.imgType,
+              type: currWidgetsDetails?.type
+            })
+          );
+        }
+      }
     } else {
-      const index = props?.xyPosition?.findIndex((object) => {
-        return object.pageNumber === pageNumber;
-      });
+      const index = props?.xyPosition?.findIndex(
+        (p) => p.pageNumber === (currWidgetsDetails?.pageNumber || pageNumber)
+      );
       const getImage = onSaveImage(
         signatureType,
         props?.xyPosition,
@@ -305,7 +402,10 @@ function WidgetsValueModal(props) {
         currWidgetsDetails?.key,
         image,
         false,
-        widgetsType
+        widgetsType,
+        null,
+        defaultStampImg,
+        defaultStampType
       );
       setXyPosition(getImage);
     }
@@ -326,23 +426,33 @@ function WidgetsValueModal(props) {
     const isTypeText = width && height ? true : false;
     // final getting signature url via default select sign/default initial sign/self draw sign
     const signUrl = isDefaultSign
+      ? isDefaultSign === "myinitials" && myInitial
+        ? await convertJpegToPng(myInitial, "myinitials")
+        : await convertJpegToPng(defaultSignImg, "mysign")
+      : signature;
+    isDefaultSign
       ? isDefaultSign === "initials"
-        ? await convertJpegToPng(myInitial, "myinitials") // default initials set through my signature tab
+        ? myInitial && (await convertJpegToPng(myInitial, "myinitials")) // default initials set through my signature tab
         : await convertJpegToPng(defaultSignImg, "mysign") // default signature set through my signature tab
       : signature; // signature done by user thorugh draw, upload, typed
-    const signatureImg = signUrl;
+    let signatureImg = signUrl;
     let imgWH = { width: width ? width : "", height: height ? height : "" };
     setIsImageSelect(false);
     setImage();
-    // `isApplyAll` is used when user edit signature/initial then updated signature apply all existing drawn signatures
-    const isApplyAll = true;
     if (uniqueId) {
+      const isPrefill = xyPosition.some(
+        (x) => x.Id === uniqueId && x?.Role === "prefill"
+      );
+      if (isPrefill) {
+        dispatch(setPrefillImgLoad({ [currWidgetsDetails?.key]: true }));
+        signatureImg = await handleSavePrefillImg(signatureImg);
+      }
       setXyPosition((prevState) =>
         prevState.map((signer) => {
           if (signer.Id !== uniqueId) return signer;
 
-          const placeholderIndex = signer.placeHolder.findIndex(
-            (x) => x.pageNumber === pageNumber
+          const placeholderIndex = signer.placeHolder.findIndex((x) =>
+            x.pos?.some((p) => p.key === currWidgetsDetails?.key)
           );
           const updatedPlaceholders = onSaveSign(
             signType,
@@ -355,7 +465,6 @@ function WidgetsValueModal(props) {
             typedSignature,
             isAutoSign,
             widgetsType,
-            isApplyAll,
             fontSelect,
             penColor
           );
@@ -365,10 +474,24 @@ function WidgetsValueModal(props) {
           };
         })
       );
+      dispatch(setPrefillImgLoad({}));
+      if (
+        ["signature", "initials"].includes(currWidgetsDetails?.type) &&
+        (typedSignature || signatureImg)
+      ) {
+        dispatch(
+          setSignatureRes({
+            tab: isTab,
+            value: isTab === "type" ? typedSignature : signatureImg,
+            type: currWidgetsDetails?.type,
+            ...(isTab === "type" && fontSelect && { font: fontSelect })
+          })
+        );
+      }
     } else {
-      const index = props?.xyPosition?.findIndex((object) => {
-        return object.pageNumber === pageNumber;
-      });
+      const index = props?.xyPosition?.findIndex(
+        (p) => p.pageNumber === (currWidgetsDetails?.pageNumber || pageNumber)
+      );
       const getUpdatePosition = onSaveSign(
         signType,
         props?.xyPosition,
@@ -379,7 +502,9 @@ function WidgetsValueModal(props) {
         isTypeText,
         typedSignature,
         false,
-        widgetsType
+        widgetsType,
+        fontSelect,
+        penColor
       );
       setXyPosition(getUpdatePosition);
     }
@@ -388,47 +513,66 @@ function WidgetsValueModal(props) {
 
   //function to handle allowed tab in signature pad
   function handleTab() {
-    const signtypes = signatureTypes || [];
-    const defaultIndex = signtypes?.findIndex(
-      (x) =>
-        x.name === "default" &&
-        x.enabled === true &&
-        defaultSignImg &&
-        currWidgetsDetails?.type !== "image" &&
-        currWidgetsDetails?.type !== "stamp"
-    );
-    const getIndex =
-      defaultIndex !== -1 // Check if the default index exists
-        ? defaultIndex // If found, use it
-        : signtypes?.findIndex((x) => x.enabled === true);
+    if (["signature", "initials"].includes(currWidgetsDetails.type)) {
+      const signtypes = signatureTypes || [];
+      const defaultIndex = signtypes?.findIndex(
+        (x) =>
+          x.name === "default" &&
+          x.enabled === true &&
+          defaultSignImg &&
+          currWidgetsDetails?.type !== "image" &&
+          currWidgetsDetails?.type !== "stamp"
+      );
+      const getIndex =
+        defaultIndex !== -1 // Check if the default index exists
+          ? defaultIndex // If found, use it
+          : signtypes?.findIndex((x) => x.enabled === true);
 
-    if (getIndex !== -1) {
-      setIsSignTypes(true);
-      const tab = signatureTypes?.[getIndex].name;
-      if (currWidgetsDetails?.signatureType === "type") {
-        setIsTab("type");
-      } else if (tab === "draw") {
-        setIsTab("draw");
-      } else if (tab === "upload") {
-        setIsImageSelect(true);
-        setIsTab("uploadImage");
-      } else if (tab === "typed") {
-        setIsTab("type");
-      } else if (tab === "default") {
+      if (getIndex !== -1) {
+        setIsSignTypes(true);
+        const tab = signatureTypes?.[getIndex].name;
+        const previousWidgetRes = signatureResponse.find(
+          (item) => item.type === currWidgetsDetails?.type
+        );
         if (
-          (currWidgetsDetails?.type === "initials" && myInitial) ||
-          (currWidgetsDetails?.type !== "initials" && defaultSignImg)
+          previousWidgetRes?.tab &&
+          previousWidgetRes?.type === currWidgetsDetails?.type
         ) {
-          setIsDefaultSign(true);
-          setIsTab("mysignature");
-        } else {
+          setIsTab(previousWidgetRes?.tab || "draw");
+        } else if (currWidgetsDetails?.signatureType) {
+          setIsTab(currWidgetsDetails?.signatureType);
+        } else if (tab === "draw") {
           setIsTab("draw");
+        } else if (tab === "upload") {
+          setIsImageSelect(true);
+          setIsTab("image");
+        } else if (tab === "typed") {
+          setIsTab("type");
+        } else if (tab === "default") {
+          if (currWidgetsDetails?.type !== "initials" && defaultSignImg) {
+            setIsTab("mysignature");
+          } else if (currWidgetsDetails?.type === "initials" && myInitial) {
+            setIsTab("myinitials");
+          } else {
+            setIsTab("draw");
+          }
         }
       } else {
-        setIsTab(true);
+        setIsSignTypes(false);
       }
-    } else {
-      setIsSignTypes(false);
+    } else if (currWidgetsDetails?.type === "image") {
+      setIsTab("image");
+    } else if (currWidgetsDetails?.type === "stamp") {
+      const previousWidgetRes = signatureResponse.find(
+        (item) => item.type === currWidgetsDetails?.type
+      );
+      if (previousWidgetRes?.tab === "uploadStamp") {
+        setIsTab("uploadStamp");
+      } else if (myStamp) {
+        setIsTab("myStamp");
+      } else {
+        setIsTab("uploadStamp");
+      }
     }
   }
   function isTabEnabled(tabName) {
@@ -439,7 +583,7 @@ function WidgetsValueModal(props) {
   //function for clear signature image
   const handleClear = () => {
     if (
-      ["signature", "initials", "stamp", "image"].includes(
+      ["signature", "initials", "stamp", "image", drawWidget].includes(
         currWidgetsDetails?.type
       )
     ) {
@@ -455,25 +599,22 @@ function WidgetsValueModal(props) {
       }
     } else {
       if (currWidgetsDetails?.type === cellsWidget) {
-        const count =
-          currWidgetsDetails?.options?.cellCount || cellsValue.length || 1;
-        const cleared = Array.from({ length: count }, () => "");
-        setCellsValue(cleared);
-        const combined = cleared.join("");
-        setWidgetValue(combined);
+        setWidgetValue("");
         onChangeInput(
-          combined,
-          currWidgetsDetails?.key,
+          "",
+          currWidgetsDetails,
           xyPosition,
           props.index,
           setXyPosition,
           uniqueId
         );
       } else {
+        setSelectedCheckbox([]);
         setWidgetValue("");
+        setStartDate("");
         onChangeInput(
           "",
-          currWidgetsDetails?.key,
+          currWidgetsDetails,
           xyPosition,
           props.index,
           setXyPosition,
@@ -486,170 +627,98 @@ function WidgetsValueModal(props) {
   const handleSignatureChange = (data) => {
     setSignature(data);
   };
-  function base64StringtoFile(base64String, filename) {
-    let arr = base64String.split(","),
-      // type of uploaded image
-      mime = arr[0].match(/:(.*?);/)[1],
-      // decode base64
-      bstr = atob(arr[1]),
-      n = bstr.length,
-      u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    const ext = mime.split("/").pop();
-    const name = `${filename}.${ext}`;
-    return new File([u8arr], name, { type: mime });
-  }
-
-  const uploadFile = async (file) => {
-    try {
-      const parseFile = new Parse.File(file.name, file);
-      const response = await parseFile.save();
-      if (response?.url()) {
-        const fileRes = await getSecureUrl(response.url());
-        if (fileRes.url) {
-          const tenantId = localStorage.getItem("TenantId");
-          SaveFileSize(file.size, fileRes.url, tenantId);
-          return fileRes?.url;
-        } else {
-          alert(`${t("something-went-wrong-mssg")}`);
-          return false;
-        }
-      } else {
-        alert(`${t("something-went-wrong-mssg")}`);
-        return false;
-      }
-    } catch (err) {
-      console.log("sign upload err", err);
-      alert(`${err.message}`);
-      return false;
-    }
-  };
-
-  // `handlesavesign` is used to save signature, initials, stamp as a default
-  const handleSaveSign = async () => {
+  // `handleSaveToMySign` is used to save signature, initials, stamp as a default
+  const handleSaveToMySign = async () => {
     if (signature || image?.src) {
       setIsLoader(true);
       try {
-        const User = Parse?.User?.current();
-        const sanitizename = generateTitleFromFilename(User?.get("name"));
-        const replaceSpace = sanitizeFileName(sanitizename);
-        let file;
-        if (signature) {
-          file = base64StringtoFile(signature, `${replaceSpace}__sign`);
-        } else {
-          file = base64StringtoFile(image?.src, `${replaceSpace}__sign`);
+        const mySignRes = await saveToMySign({
+          type: currWidgetsDetails?.type,
+          base64: signature || image?.src,
+          defaultSignId: mysign?.signId
+        });
+        if (mysign?.signId) {
+          dispatch(setSaveSignCheckbox({ ...mysign, signId: mySignRes?.id }));
         }
-        const imageUrl = await uploadFile(file);
-        const userId = {
-          __type: "Pointer",
-          className: "_User",
-          objectId: User?.id
-        };
-        if (imageUrl) {
-          // below code is used to save or update default signature, initials, stamp
-          try {
-            const signCls = new Parse.Object("contracts_Signature");
-            if (saveSignCheckbox?.signId) {
-              signCls.id = saveSignCheckbox.signId;
-            }
-            if (currWidgetsDetails?.type === "initials") {
-              signCls.set("Initials", imageUrl);
-            } else if (currWidgetsDetails?.type === "signature") {
-              signCls.set("ImageURL", imageUrl);
-            }
-            signCls.set("UserId", userId);
-            const signRes = await signCls.save();
-            if (signRes) {
-              // props.saveSignCheckbox.signId;
-              dispatch(
-                setSaveSignCheckbox({
-                  ...saveSignCheckbox,
-                  signId: signRes?.id
-                })
-              );
-              const _signRes = JSON.parse(JSON.stringify(signRes));
-              if (currWidgetsDetails?.type === "signature") {
-                const defaultSign = await getBase64FromUrl(
-                  _signRes?.ImageURL,
-                  true
-                );
-                dispatch(setDefaultSignImg(defaultSign));
-              } else if (currWidgetsDetails?.type === "initials") {
-                const defaultInitials = await getBase64FromUrl(
-                  _signRes?.Initials,
-                  true
-                );
-                dispatch(setMyInitial(defaultInitials));
-              }
-              alert(t("saved-successfully"));
-            }
-            return signRes;
-          } catch (err) {
-            console.log(err);
-            alert(`${err.message}`);
-          } finally {
-            setIsLoader(false);
-          }
+        if (currWidgetsDetails?.type === "signature") {
+          dispatch(setDefaultSignImg(mySignRes.base64File));
+        } else if (currWidgetsDetails?.type === "initials") {
+          dispatch(setMyInitial(mySignRes.base64File));
+        } else if (currWidgetsDetails?.type === "stamp") {
+          dispatch(setMyStamp(mySignRes.base64File));
         }
-      } catch (err) {
-        console.log("Err while saving signature", err);
+        alert(t("saved-successfully"));
+      } catch (error) {
+        console.log("error while save to my sign", error?.message);
+        alert(`${error.message}`);
+      } finally {
+        setIsLoader(false);
       }
     }
   };
 
   const handleSaveBtn = async () => {
+    // if User checked save signature or save initials checkbox
     if (accesstoken && isSavedSign) {
-      await handleSaveSign();
-      resetToDefault();
-    } else {
-      resetToDefault();
+      await handleSaveToMySign();
     }
+    resetToDefault();
   };
   const resetToDefault = () => {
     props?.setCurrWidgetsDetails({});
-    if (!image) {
-      if (isTab === "mysignature") {
+    if (
+      isTab !== "image" &&
+      !["stamp", "image"].includes(currWidgetsDetails?.type)
+    ) {
+      if (isTab === "myStamp" && myStamp) {
+        handleSaveImage();
+      } else if (isTab === "mysignature") {
         setSignature("");
-        if (currWidgetsDetails?.type === "initials") {
-          handleSaveSignature(isTab, "initials");
-        } else {
-          handleSaveSignature(null, "default");
-        }
-      } else {
-        if (isTab === "type") {
-          setSignature("");
+        handleSaveSignature(null, "default");
+      } else if (currWidgetsDetails?.type === "initials") {
+        if (myInitial && isTab === "myinitials") {
+          handleSaveSignature(isTab, "myinitials");
+        } else if (isTab === "type") {
           handleSaveSignature(
             "type",
             false,
-            !currWidgetsDetails?.type === "initials" && textWidth > 150
-              ? 150
-              : textWidth,
-            !currWidgetsDetails?.type === "initials" && textHeight > 35
-              ? 35
-              : textHeight,
+            textWidth,
+            textHeight,
             typedSignature
           );
         } else {
-          setSignature("");
-          canvasRef?.current?.clear();
-          const tab = isTab === "uploadImage" ? "image" : isTab;
-          handleSaveSignature(tab);
+          handleSaveSignature(isTab);
         }
+      } else if (isTab === "type") {
+        setSignature("");
+        handleSaveSignature(
+          "type",
+          false,
+          !currWidgetsDetails?.type === "initials" && textWidth > 150
+            ? 150
+            : textWidth,
+          !currWidgetsDetails?.type === "initials" && textHeight > 35
+            ? 35
+            : textHeight,
+          typedSignature
+        );
+      } else {
+        setSignature("");
+        canvasRef?.current?.clear();
+        const tab = isTab;
+        handleSaveSignature(tab);
       }
-      setPenColor("blue");
+      handlePenColor();
     } else {
       setSignature("");
       handleSaveImage("image");
     }
     setIsImageSelect(false);
-    setIsDefaultSign(false);
     setImage();
     handleTab();
   };
   const autoSignAll = (
-    <label className="mb-0 cursor-pointer flex items-center text-sm">
+    <label className="mb-0 cursor-pointer flex items-center text-sm text-base-content">
       <input
         className="mr-2 md:mr-3 op-checkbox op-checkbox-xs md:op-checkbox-sm"
         type="checkbox"
@@ -665,11 +734,12 @@ function WidgetsValueModal(props) {
   useEffect(() => {
     const loadFont = async () => {
       try {
-        await document.fonts.load(`20px ${fontSelect}`);
-        const selectFontSTyle = fontOptions.find(
-          (font) => font.value === fontSelect
+        const selectedFont = typedSignFont || fontSelect;
+        await document.fonts.load(`20px ${selectedFont}`);
+        const selectFontStyle = fontOptions.find(
+          (font) => font.value === selectedFont
         );
-        setFontSelect(selectFontSTyle?.value || fontOptions[0].value);
+        setFontSelect(selectFontStyle?.value || fontOptions[0].value);
       } catch (error) {
         console.error("Error loading font:", error);
       }
@@ -678,79 +748,128 @@ function WidgetsValueModal(props) {
     loadFont();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontSelect]);
-
   useEffect(() => {
-    if (currWidgetsDetails?.options?.response) {
-      const url = currWidgetsDetails?.options?.response;
-      if (["signature", "initials"].includes(currWidgetsDetails?.type)) {
-        if (isTab === "draw" && currWidgetsDetails?.signatureType === "draw") {
-          setSignature(url);
-          // Load the default signature after the component mounts
-          if (canvasRef.current) {
+    handleWidgetsResponse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTab]);
+
+  const handleWidgetsResponse = async () => {
+    //'signatureResponse' is save signature/initials widget response to show on response in signature pad
+    const previousWidgetRes = signatureResponse.find(
+      (item) => item.type === currWidgetsDetails?.type
+    );
+    let url = currWidgetsDetails?.options?.response;
+    if (currWidgetsDetails?.options?.response || previousWidgetRes) {
+      //draw widget
+      if (currWidgetsDetails?.type === drawWidget) {
+        if (canvasRef.current) {
+          const iBase64 = isValidBase64(url);
+          if (iBase64) {
             canvasRef.current.fromDataURL(url);
+          } else {
+            const isAddSuffix = true;
+            const base64Url = await getBase64FromUrl(url, isAddSuffix);
+            canvasRef.current.fromDataURL(base64Url);
           }
-        } else if (isTab === "uploadImage" && currWidgetsDetails?.ImageType) {
+        }
+      }
+      //signature and initial widgets
+      if (isSignOrInitials) {
+        if (isTab === "draw" || isTab === "image") {
+          if (
+            (previousWidgetRes?.tab === "draw" &&
+              currWidgetsDetails?.signatureType !== "draw" &&
+              previousWidgetRes?.type === currWidgetsDetails?.type) ||
+            currWidgetsDetails?.signatureType === "draw"
+          ) {
+            url = url || previousWidgetRes?.value;
+            setSignature(url);
+            canvasRef.current && canvasRef.current.fromDataURL(url);
+            return;
+          } else if (
+            previousWidgetRes?.tab === "image" &&
+            previousWidgetRes?.type === currWidgetsDetails?.type
+          ) {
+            setImage({
+              src: previousWidgetRes?.value,
+              imgType: previousWidgetRes?.imageType
+            });
+          }
+        }
+        if (isTab === "image" && currWidgetsDetails?.ImageType) {
           setImage({ imgType: currWidgetsDetails?.ImageType, src: url });
         }
-      } else if (["image", "stamp"].includes(currWidgetsDetails?.type)) {
-        setImage({ imgType: currWidgetsDetails?.ImageType, src: url });
+      }
+      //image and stamp widget
+      if (isImageOrStamp) {
+        const isPrefill = xyPosition.some(
+          (x) => x.Id === uniqueId && x?.Role === "prefill"
+        );
+        if (isPrefill) {
+          const getPrefillImg = prefillImg?.find(
+            (x) => x.id === currWidgetsDetails?.key
+          );
+          url = getPrefillImg?.base64;
+        }
+        if (
+          ["myStamp", "uploadStamp"].includes(previousWidgetRes?.tab) &&
+          previousWidgetRes?.type === currWidgetsDetails?.type
+        ) {
+          setImage({
+            imgType: previousWidgetRes?.ImageType,
+            src: previousWidgetRes?.value
+          });
+        } else if (isTab === "myStamp") {
+          setImage(null);
+        } else if (
+          currWidgetsDetails?.options?.response &&
+          currWidgetsDetails?.type === "image"
+        ) {
+          setImage({ imgType: currWidgetsDetails?.ImageType, src: url });
+        }
       }
     }
     if (isTab === "type") {
+      const signerName = localStorage.getItem("signer")
+        ? JSON.parse(localStorage.getItem("signer"))?.Name
+        : currentUserName;
       //trim user name or typed name value to show in initial signature
       const trimmedName = typedSignature
         ? typedSignature?.trim()
-        : currentUserName?.trim();
+        : props?.journey === "kiosk-signing" && kiosk_signer
+          ? kiosk_signer[0]?.Name?.trim()
+          : signerName?.trim();
       //get full name of user
-      const fullUserName = typedSignature || currentUserName;
-      const firstCharacter = trimmedName?.charAt(0);
+      const fullUserName =
+        typedSignature ||
+        (props?.journey === "kiosk-signing" && kiosk_signer
+          ? kiosk_signer[0]?.Name
+          : signerName);
+      const firstCharacter = getInitials(trimmedName);
       const userName =
         currWidgetsDetails?.type === "initials" ? firstCharacter : fullUserName;
       const signatureValue = currWidgetsDetails?.typeSignature;
       setTypedSignature(signatureValue || userName || "");
       convertToImg(fontSelect, signatureValue || userName || "");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTab]);
+  };
   // function for convert input text value in image
   const convertToImg = async (fontStyle, text, color) => {
     const maxWidth = currWidgetsDetails?.Width;
     const maxHeight = currWidgetsDetails?.Height;
     const widgetDims = { Width: maxWidth, Height: maxHeight };
-    const fontFamily = fontStyle || fontSelect || "Fasthand";
+    const fontFamily = fontStyle || typedSignFont || fontSelect || "Fasthand";
     const fillColor = color || penColor;
     const dataUrl = convertTextToImg(fontFamily, text, fillColor, widgetDims);
-    setSignature(dataUrl);
+    // setSignature(dataUrl);
     setTextWidth(maxWidth);
     setTextHeight(maxHeight);
-  };
-  const PenColorComponent = () => {
-    return (
-      <div className="flex flex-row items-center m-[5px] gap-3">
-        <span className="text-base-content">{t("options")}</span>
-        {allColor.map((data, key) => {
-          return (
-            <i
-              key={key}
-              onClick={() => {
-                convertToImg(fontSelect, typedSignature, data);
-                setPenColor(allColor[key]);
-              }}
-              className={`border-b-[2px] cursor-pointer ${key === 0 && penColor === "blue" ? "border-blue-600" : key === 1 && penColor === "red" ? "border-red-500" : key === 2 && penColor === "black" ? "border-black" : "border-white"} text-[${data}] text-[16px] fa-light fa-pen-nib`}
-            ></i>
-          );
-        })}
-      </div>
-    );
+    dispatch(setTypedSignFont(fontFamily));
   };
 
   // Effect to store original image and apply initial BG removal if enabled
   useEffect(() => {
-    if (
-      image?.src &&
-      !originalImage &&
-      (isImageSelect || ["image", "stamp"].includes(currWidgetsDetails?.type))
-    ) {
+    if (image?.src && !originalImage && (isImageSelect || isImageOrStamp)) {
       // If there's an image, and we haven't stored an original for it yet,
       // and we are in a relevant tab/widget type for uploads
       setOriginalImage(image); // Store the current image as original
@@ -761,7 +880,7 @@ function WidgetsValueModal(props) {
           .then((blob) => {
             const reader = new FileReader();
             reader.onloadend = () => {
-              setImage({ src: reader.result, imgType: blob.type });
+              // setImage({ src: reader.result, imgType: blob.type });
             };
             reader.onerror = () => {
               console.error(
@@ -791,10 +910,7 @@ function WidgetsValueModal(props) {
 
   // Effect for toggling BG removal ON/OFF
   useEffect(() => {
-    if (
-      !originalImage?.src ||
-      !(isImageSelect || ["image", "stamp"].includes(currWidgetsDetails?.type))
-    ) {
+    if (!originalImage?.src || !(isImageSelect || isImageOrStamp)) {
       // No original image to process or not in a relevant upload state
       return;
     }
@@ -825,7 +941,11 @@ function WidgetsValueModal(props) {
     } else {
       // removeBgEnabled is false, revert to originalImage
       if (image?.src !== originalImage.src) {
-        setImage(originalImage);
+        if (isTab === "myStamp") {
+          setImage(null);
+        } else {
+          setImage(originalImage);
+        }
       }
     }
   }, [
@@ -866,7 +986,7 @@ function WidgetsValueModal(props) {
     }
     onChangeInput(
       checkedList ? checkedList : updateSelectedCheckbox,
-      currWidgetsDetails?.key,
+      currWidgetsDetails,
       xyPosition,
       props.index,
       setXyPosition,
@@ -884,7 +1004,7 @@ function WidgetsValueModal(props) {
     setWidgetValue(data);
     onChangeInput(
       data,
-      currWidgetsDetails?.key,
+      currWidgetsDetails,
       xyPosition,
       props.index,
       setXyPosition,
@@ -901,40 +1021,32 @@ function WidgetsValueModal(props) {
       onClick={onClick}
       ref={ref}
     >
-      {value}
+      {value ? value : "Select date"}
       <i className="fa-light fa-calendar ml-[5px]"></i>
     </div>
   ));
   ExampleCustomInput.displayName = "ExampleCustomInput";
   //function to set onchange date
   const handleOnDateChange = (date) => {
+    setWidgetValue(date);
     setStartDate(date);
   };
   const handleOnchangeTextBox = (e) => {
     // hide any prior validation error while typing
     setIsShowValidation(false);
-    setWidgetValue(e.target.value);
-    onChangeInput(
-      e.target.value,
-      currWidgetsDetails?.key,
-      xyPosition,
-      props.index,
-      setXyPosition,
-      uniqueId
-    );
-  };
-  const updateCells = (updated) => {
-    setCellsValue(updated);
-    const combined = updated.join("");
-    setWidgetValue(combined);
+    let value =
+      currWidgetsDetails?.type === "dropdown"
+        ? e.target?.value?.trim()
+        : e.target.value;
+    setWidgetValue(value);
     props.setCurrWidgetsDetails?.((prev) =>
       prev && prev.key === currWidgetsDetails?.key
-        ? { ...prev, options: { ...prev.options, response: combined } }
+        ? { ...prev, options: { ...prev.options, response: value } }
         : prev
     );
     onChangeInput(
-      combined,
-      currWidgetsDetails?.key,
+      value,
+      currWidgetsDetails,
       xyPosition,
       props.index,
       setXyPosition,
@@ -942,38 +1054,279 @@ function WidgetsValueModal(props) {
     );
   };
 
-  const handleCellsInput = (e, idx) => {
+  const updateCells = (updated) => {
+    setWidgetValue(updated);
+    props.setCurrWidgetsDetails?.((prev) =>
+      prev && prev.key === currWidgetsDetails?.key
+        ? { ...prev, options: { ...prev.options, response: updated } }
+        : prev
+    );
+    onChangeInput(
+      updated,
+      currWidgetsDetails,
+      xyPosition,
+      props.index,
+      setXyPosition,
+      uniqueId
+    );
+  };
+  const handleCellsInput = (e) => {
+    const value = e.target.value;
     setIsShowValidation(false);
-    const val = e.target.value.slice(0, 1);
-    const updated = [...cellsValue];
-    updated[idx] = val;
-    updateCells(updated);
-  };
-  const handleCellsKeyDown = (e, idx) => {
-    if (e.key === "Backspace" && !cellsValue[idx] && idx > 0) {
-      e.preventDefault();
-      cellRefs.current[idx - 1]?.focus();
-    }
-  };
-
-  const handleCellResize = (newCount) => {
-    let updated = [...cellsValue];
-    if (newCount > updated.length) {
-      updated = [...updated, ...Array(newCount - updated.length).fill("")];
-    } else if (newCount < updated.length) {
-      updated = updated.slice(0, newCount);
-    }
-    cellRefs.current = cellRefs.current.slice(0, newCount);
-    updateCells(updated);
-    setCellCount?.(currWidgetsDetails?.key, newCount);
-  };
-
-  // when focus leaves the cells widget, validate the input
-  const handleCellsBlur = (e, idx) => {
-    handleInputBlur();
+    updateCells(value);
   };
   //function is used to show widgets on modal according to selected widget type checkbox/date/radio/drodown/textbox/signature/image
   const getWidgetType = (type) => {
+    const isStampOrImage =
+      currWidgetsDetails?.type === "stamp" ||
+      currWidgetsDetails?.type === "image";
+
+    const myStampImg = {
+      src: myStamp
+    };
+    const Tabs = [
+      //My signature tab
+      {
+        id: "mysignature",
+        label: t("my-signature"),
+        onClick: () => setIsTab("mysignature"),
+        show:
+          currWidgetsDetails?.type === "signature" &&
+          defaultSignImg &&
+          isTabEnabled("default"),
+        render: () => (
+          <>
+            <DefaultSignature
+              defaultSignImg={defaultSignImg}
+              currWidgetsDetails={currWidgetsDetails}
+            />
+            {uniqueId && (
+              <div className="flex justify-center my-2">{autoSignAll}</div>
+            )}
+          </>
+        )
+      },
+      //My initials tab
+      {
+        id: "myinitials",
+        label: t("my-initials"),
+        onClick: () => setIsTab("myinitials"),
+        show:
+          currWidgetsDetails?.type === "initials" &&
+          myInitial &&
+          isTabEnabled("default"),
+        render: () => (
+          <>
+            <DefaultSignature
+              defaultSignImg={myInitial}
+              currWidgetsDetails={currWidgetsDetails}
+            />
+            {uniqueId && (
+              <div className="flex justify-center my-2">{autoSignAll}</div>
+            )}
+          </>
+        )
+      },
+      //Draw tab
+      {
+        id: "draw",
+        label: t("draw"),
+        show: isTabEnabled("draw") && !isStampOrImage,
+        onClick: () => setIsTab("draw"),
+        render: () => (
+          <>
+            <Draw
+              penColor={penColor}
+              canvasRef={canvasRef}
+              currWidgetsDetails={currWidgetsDetails}
+              handleSignatureChange={handleSignatureChange}
+            />
+            <div className="flex flex-row justify-between mt-[10px]">
+              <PenColorComponent
+                providedColors={penColors}
+                penColor={penColor}
+                convertToImg={convertToImg}
+                fontSelect={fontSelect}
+                typedSignature={typedSignature}
+                setPenColor={setPenColor}
+              />
+            </div>
+            <div className="flex flex-row ml-1 mt-1 gap-x-3 text-base-content">
+              {/* Standalone autoSignAll for "Draw" tab if conditions met */}
+              {/* 'uniqueId' represents the current user */}
+              {uniqueId && (
+                <div className="flex justify-start my-1">{autoSignAll}</div>
+              )}
+              {accesstoken && (
+                <div className="flex justify-start my-1">
+                  {mysign?.isVisible && savesigncheckbox}
+                </div>
+              )}
+            </div>
+          </>
+        )
+      },
+      //Upload Image tab
+      {
+        id: "image",
+        label: t("upload-image"),
+        onClick: () => {
+          setIsTab("image");
+          setIsImageSelect(true);
+        },
+        show:
+          (isTabEnabled("upload") && currWidgetsDetails?.type !== "stamp") ||
+          currWidgetsDetails?.type === "image",
+        render: () => (
+          <>
+            <UploadImage
+              currWidgetsDetails={currWidgetsDetails}
+              image={image}
+              onImageChange={onImageChange}
+              isImageSelect={isImageSelect}
+              isStampOrImage={isStampOrImage}
+            />
+            {/* 'uniqueId' represents the current user */}
+            {/* 'image' checks whether an image is available */}
+            {/* 'isImageSelect' indicates if the user selected the upload-image option for the signature pad */}
+            {/* 'isImageOrStamp' determines whether the item is an image or a stamp */}
+            {(uniqueId || (image && (isImageSelect || isImageOrStamp))) && (
+              <div className="flex flex-wrap flex-row sm:justify-center items-center gap-x-3 my-2 text-base-content">
+                {uniqueId && autoSignAll}
+                {image && (isImageSelect || isImageOrStamp) && (
+                  <label
+                    htmlFor={`removeBgToggleModal-${currWidgetsDetails?.key}`}
+                    className="mb-0 cursor-pointer flex items-center text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      id={`removeBgToggleModal-${currWidgetsDetails?.key}`} // Unique ID
+                      className="mr-2 op-checkbox op-checkbox-xs md:op-checkbox-sm"
+                      checked={removeBgEnabled}
+                      onChange={() => setRemoveBgEnabled(!removeBgEnabled)}
+                    />
+                    {t("remove-background")}
+                  </label>
+                )}
+                {accesstoken && isSignOrInitials && (
+                  <div className="flex justify-start my-1">
+                    {mysign?.isVisible && savesigncheckbox}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )
+      },
+      //Typed signature tab
+      {
+        id: "type",
+        label: t("type"),
+        onClick: () => {
+          setIsTab("type");
+          if (previousWidgetRes?.tab !== "type") {
+            setTypedSignature("");
+          }
+        },
+        show: isTabEnabled("typed") && !isStampOrImage,
+        render: () => (
+          <>
+            <TypeSignature
+              currWidgetsDetails={currWidgetsDetails}
+              fontSelect={fontSelect}
+              penColor={penColor}
+              typedSignature={typedSignature}
+              setTypedSignature={setTypedSignature}
+              convertToImg={convertToImg}
+              fontOptions={fontOptions}
+              setFontSelect={setFontSelect}
+            />
+            <div className="flex flex-row justify-between mt-[10px]">
+              <PenColorComponent
+                providedColors={penColors}
+                penColor={penColor}
+                convertToImg={convertToImg}
+                fontSelect={fontSelect}
+                typedSignature={typedSignature}
+                setPenColor={setPenColor}
+              />
+            </div>
+            <div className="flex flex-row ml-1 mt-2 gap-x-3 text-base-content">
+              {/* Standalone autoSignAll for "Type" tab if conditions met */}
+              {uniqueId && (
+                <div className="flex justify-start my-1">{autoSignAll}</div>
+              )}
+              {accesstoken && (
+                <div className="flex justify-start my-1">
+                  {mysign?.isVisible && savesigncheckbox}
+                </div>
+              )}
+            </div>
+          </>
+        )
+      },
+      //Mystamp tab
+      {
+        id: "myStamp",
+        label: "My stamp",
+        onClick: () => setIsTab("myStamp"),
+        show: currWidgetsDetails?.type === "stamp" && myStamp,
+        render: () => (
+          <UploadImage
+            currWidgetsDetails={currWidgetsDetails}
+            image={myStampImg}
+            onImageChange={onImageChange}
+            isImageSelect={isImageSelect}
+            isStampOrImage={isStampOrImage}
+          />
+        )
+      },
+      // Upload Stamp Tab
+      {
+        id: "uploadStamp",
+        label: "Upload stamp",
+        onClick: () => setIsTab("uploadStamp"),
+        show: currWidgetsDetails?.type === "stamp",
+        render: () => (
+          <>
+            <UploadImage
+              currWidgetsDetails={currWidgetsDetails}
+              image={image}
+              onImageChange={onImageChange}
+              isImageSelect={isImageSelect}
+              isStampOrImage={isStampOrImage}
+            />
+            {/* 'uniqueId' represents the current user */}
+            {(uniqueId || image) && (
+              <div className="flex flex-wrap flex-row sm:justify-center items-center gap-x-3 my-2 text-base-content">
+                {uniqueId && autoSignAll}
+                {image && (
+                  <label
+                    htmlFor={`removeBgToggleModal-${currWidgetsDetails?.key}`}
+                    className="mb-0 cursor-pointer flex items-center text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      id={`removeBgToggleModal-${currWidgetsDetails?.key}`} // Unique ID
+                      className="mr-2 op-checkbox op-checkbox-xs md:op-checkbox-sm"
+                      checked={removeBgEnabled}
+                      onChange={() => setRemoveBgEnabled(!removeBgEnabled)}
+                    />
+                    {t("remove-background")}
+                  </label>
+                )}
+                {accesstoken && (
+                  <div className="flex justify-start my-1">
+                    {mysign?.isVisible && savesigncheckbox}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )
+      }
+    ];
+
     switch (type) {
       case "image":
       case "initials":
@@ -988,355 +1341,23 @@ function WidgetsValueModal(props) {
             )}
             {isSignTypes ? (
               <>
-                {currWidgetsDetails?.type !== "stamp" &&
-                  currWidgetsDetails?.type !== "image" && (
-                    <div className="text-base-content rounded-[4px] tabWidth">
-                      <div className="ml-3 flex justify-start gap-4 text-[11px] md:text-base my-[3px]">
-                        {currWidgetsDetails?.type !== "initials" &&
-                        defaultSignImg &&
-                        isTabEnabled("default") ? (
-                          <div>
-                            <span
-                              onClick={() => {
-                                setIsDefaultSign(true);
-                                setIsImageSelect(true);
-                                setIsTab("mysignature");
-                                setImage();
-                              }}
-                              className={`${
-                                isTab === "mysignature" && `${isTabCls}`
-                              } ml-[2px] cursor-pointer`}
-                            >
-                              {t("my-signature")}
-                            </span>
-                          </div>
-                        ) : (
-                          currWidgetsDetails?.type === "initials" &&
-                          myInitial &&
-                          isTabEnabled("default") && (
-                            <div>
-                              <span
-                                onClick={() => {
-                                  setIsDefaultSign(true);
-                                  setIsImageSelect(true);
-                                  setIsTab("mysignature");
-                                  setImage();
-                                }}
-                                className={`${
-                                  isTab === "mysignature" && `${isTabCls}`
-                                }   ml-[2px] cursor-pointer`}
-                              >
-                                {t("my-initials")}
-                              </span>
-                            </div>
-                          )
-                        )}
-                        {isTabEnabled("draw") && (
-                          <div>
-                            <span
-                              onClick={() => {
-                                setIsDefaultSign(false);
-                                setIsImageSelect(false);
-                                setIsTab("draw");
-                                setImage();
-                                setSignature("");
-                              }}
-                              className={`${
-                                isTab === "draw" && `${isTabCls}`
-                              }   ml-[2px] cursor-pointer`}
-                            >
-                              {t("draw")}
-                            </span>
-                          </div>
-                        )}
-                        {isTabEnabled("upload") && (
-                          <div>
-                            <span
-                              onClick={() => {
-                                setIsDefaultSign(false);
-                                setIsImageSelect(true);
-                                setIsTab("uploadImage");
-                              }}
-                              className={`${
-                                isTab === "uploadImage" && `${isTabCls}`
-                              }  ml-[2px] cursor-pointer`}
-                            >
-                              {t("upload-image")}
-                            </span>
-                          </div>
-                        )}
-                        {isTabEnabled("typed") && (
-                          <div>
-                            <span
-                              onClick={() => {
-                                setIsDefaultSign(false);
-                                setIsImageSelect(false);
-                                setIsTab("type");
-                                setImage();
-                              }}
-                              className={`${
-                                isTab === "type" && `${isTabCls}`
-                              } ml-[2px] cursor-pointer`}
-                            >
-                              {t("type")}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                <div
-                  className={`${
-                    currWidgetsDetails?.type === "stamp" ||
-                    currWidgetsDetails?.type === "image"
-                      ? ""
-                      : "mt-3"
-                  } h-full`}
-                >
-                  {isDefaultSign ? (
-                    <>
-                      {currWidgetsDetails?.type !== "initials" &&
-                        defaultSignImg &&
-                        isTabEnabled("default") && (
-                          <>
-                            <div className="flex justify-center">
-                              <div
-                                className={`${currWidgetsDetails?.type === "initials" ? "intialSignatureCanvas" : "signatureCanvas"} border-[1.3px] border-gray-300 rounded-[4px] flex flex-col justify-center items-center mb-[6px] cursor-pointer`}
-                              >
-                                <img
-                                  alt="stamp img"
-                                  className="w-full h-full object-contain"
-                                  draggable="false"
-                                  src={
-                                    currWidgetsDetails?.type === "initials"
-                                      ? myInitial
-                                      : defaultSignImg
-                                  }
-                                />
-                              </div>
-                            </div>
-                            {/* Standalone autoSignAll for "My Signature/Initials" (isDefaultSign) if conditions met */}
-                            {uniqueId && (
-                              <div className="flex justify-center my-2">
-                                {autoSignAll}
-                              </div>
-                            )}
-                          </>
-                        )}
-
-                      {currWidgetsDetails?.type === "initials" &&
-                        myInitial &&
-                        isTabEnabled("default") && (
-                          <>
-                            <div className="flex justify-center">
-                              <div
-                                className={`${currWidgetsDetails?.type === "initials" ? "intialSignatureCanvas" : "signatureCanvas"} bg-white border-[1.3px] border-gray-300 flex flex-col justify-center items-center mb-[6px] cursor-pointer`}
-                              >
-                                <img
-                                  alt="stamp img"
-                                  className="w-full h-full object-contain bg-white"
-                                  draggable="false"
-                                  src={
-                                    currWidgetsDetails?.type === "initials"
-                                      ? myInitial
-                                      : defaultSignImg
-                                  }
-                                />
-                              </div>
-                            </div>
-                            {/* Standalone autoSignAll for "My Signature/Initials" (isDefaultSign) if conditions met */}
-                            {uniqueId && (
-                              <div className="flex justify-center my-2">
-                                {autoSignAll}
-                              </div>
-                            )}
-                          </>
-                        )}
-                    </>
-                  ) : isImageSelect ||
-                    currWidgetsDetails?.type === "stamp" ||
-                    currWidgetsDetails?.type === "image" ? (
-                    !image ? (
-                      <div className="flex justify-center">
-                        <div
-                          className={`${currWidgetsDetails?.type === "initials" ? "intialSignatureCanvas" : "signatureCanvas"} bg-white border-[1.3px] border-gray-300 flex flex-col justify-center items-center mb-[6px] cursor-pointer`}
-                          onClick={() => imageRef.current.click()}
+                <div className="text-base-content rounded-[4px] tabWidth">
+                  {/* Render All Tabs  */}
+                  <div className="ml-3 flex justify-start gap-4 text-[11px] md:text-base my-[3px]">
+                    {Tabs.filter((tab) => tab.show).map((tab) => (
+                      <div key={tab.id}>
+                        <span
+                          className={`${isTab === tab.id && isTabCls} ml-[2px] cursor-pointer`}
+                          onClick={tab.onClick}
                         >
-                          <input
-                            type="file"
-                            onChange={onImageChange}
-                            className="filetype"
-                            accept="image/png,image/jpeg"
-                            ref={imageRef}
-                            hidden
-                          />
-                          <i className="fa-light fa-cloud-upload-alt uploadImgLogo text-base-content"></i>
-                          <div className="text-[10px] text-base-content">
-                            {t("upload")}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex justify-center">
-                          <div
-                            className={`${currWidgetsDetails?.type === "initials" ? "intialSignatureCanvas" : "signatureCanvas"} bg-white border-[1.3px] border-gray-300 mb-[6px] overflow-hidden`}
-                          >
-                            <img
-                              alt="print img"
-                              ref={imageRef}
-                              src={image.src}
-                              draggable="false"
-                              className="object-contain h-full w-full"
-                            />
-                          </div>
-                        </div>
-                        {/* Shared container for autoSignAll and removeBackground when image is displayed for upload/stamp/image */}
-                        {(uniqueId ||
-                          (image &&
-                            (isImageSelect ||
-                              ["image", "stamp"].includes(
-                                currWidgetsDetails?.type
-                              )))) && (
-                          <div className="flex justify-center items-center gap-x-2 my-2">
-                            {uniqueId && autoSignAll}
-                            {image &&
-                              (isImageSelect ||
-                                ["image", "stamp"].includes(
-                                  currWidgetsDetails?.type
-                                )) && (
-                                <label
-                                  htmlFor={`removeBgToggleModal-${currWidgetsDetails?.key}`}
-                                  className="mb-0 cursor-pointer flex items-center text-sm"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    id={`removeBgToggleModal-${currWidgetsDetails?.key}`} // Unique ID
-                                    className="mr-2 op-checkbox op-checkbox-xs md:op-checkbox-sm"
-                                    checked={removeBgEnabled}
-                                    onChange={() =>
-                                      setRemoveBgEnabled(!removeBgEnabled)
-                                    }
-                                  />
-                                  {t("remove-background")}
-                                </label>
-                              )}
-                          </div>
-                        )}
-                        <div className="flex justify-end"></div>
-                      </>
-                    )
-                  ) : isTab === "type" ? (
-                    <>
-                      <div className="flex justify-between items-center tabWidth">
-                        <span className="mr-[5px] text-[12px]">
-                          {currWidgetsDetails?.type === "initials"
-                            ? t("initial-teb")
-                            : t("signature-tab")}
-                          :
+                          {tab.label}
                         </span>
-                        <input
-                          maxLength={
-                            currWidgetsDetails?.type === "initials" ? 3 : 30
-                          }
-                          style={{ fontFamily: fontSelect, color: penColor }}
-                          type="text"
-                          className="ml-1 op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content w-full text-[20px]"
-                          placeholder={
-                            currWidgetsDetails?.type === "initials"
-                              ? t("initial-type")
-                              : t("signature-type")
-                          }
-                          value={typedSignature}
-                          onChange={(e) => {
-                            setTypedSignature(e.target.value);
-                            convertToImg(fontSelect, e.target.value);
-                          }}
-                        />
                       </div>
-                      <div className="border-[1px] border-[#d6d3d3] mt-[10px] ml-[5px]">
-                        {fontOptions.map((font, ind) => {
-                          return (
-                            <div
-                              key={ind}
-                              style={{
-                                cursor: "pointer",
-                                fontFamily: font.value,
-                                backgroundColor:
-                                  fontSelect === font.value &&
-                                  "rgb(206 225 247)"
-                              }}
-                              onClick={() => {
-                                setFontSelect(font.value);
-                                convertToImg(font.value, typedSignature);
-                              }}
-                            >
-                              <div
-                                className="py-[5px] px-[10px] text-[20px]"
-                                style={{ color: penColor }}
-                              >
-                                {typedSignature
-                                  ? typedSignature
-                                  : "Your signature"}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="flex flex-row justify-between mt-[10px]">
-                        <PenColorComponent />
-                      </div>
-                      <div className="flex flex-row ml-1 mt-2 gap-x-3 text-base-content">
-                        {/* Standalone autoSignAll for "Type" tab if conditions met */}
-                        {uniqueId && (
-                          <div className="flex justify-start my-1">
-                            {autoSignAll}
-                          </div>
-                        )}
-                        {accesstoken && (
-                          <div className="flex justify-start my-1">
-                            {saveSignCheckbox?.isVisible && savesigncheckbox}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    // This is the "Draw" tab
-                    <>
-                      <div className="flex justify-center">
-                        <SignatureCanvas
-                          ref={canvasRef}
-                          penColor={penColor}
-                          canvasProps={{
-                            className: `${currWidgetsDetails?.type === "initials" ? "intialSignatureCanvas" : "signatureCanvas"} border-[1.3px] border-gray-300 rounded-[4px]`
-                          }}
-                          onEnd={() =>
-                            handleSignatureChange(
-                              canvasRef.current?.toDataURL()
-                            )
-                          }
-                          dotSize={1}
-                        />
-                      </div>
-                      <div className="flex flex-row justify-between mt-[10px]">
-                        <PenColorComponent />
-                      </div>
-                      <div className="flex flex-row ml-1 mt-1 gap-x-3 text-base-content">
-                        {/* Standalone autoSignAll for "Draw" tab if conditions met */}
-                        {uniqueId && (
-                          <div className="flex justify-start my-1">
-                            {autoSignAll}
-                          </div>
-                        )}
-                        {accesstoken && (
-                          <div className="flex justify-start my-1">
-                            {saveSignCheckbox?.isVisible && savesigncheckbox}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
+                    ))}
+                  </div>
+                </div>
+                <div className="h-full mt-3">
+                  {Tabs.find((t) => t.id === isTab)?.render()}
                 </div>
               </>
             ) : (
@@ -1364,8 +1385,8 @@ function WidgetsValueModal(props) {
             {currWidgetsDetails?.options?.values?.map((data, ind) => (
               <div key={ind} className="text-base-content select-none-cls">
                 <label
-                  htmlFor={`checkbox-${currWidgetsDetails?.key + ind}`}
-                  className="text-xs flex items-center gap-1"
+                  // htmlFor={`checkbox-${currWidgetsDetails?.key + ind}`}
+                  className="text-xs flex items-center gap-1 cursor-pointer"
                 >
                   <input
                     id={`checkbox-${currWidgetsDetails?.key + ind}`}
@@ -1404,51 +1425,42 @@ function WidgetsValueModal(props) {
         );
       case textInputWidget:
         return (
-          <input
-            placeholder={hint || t("widgets-name.text")}
-            value={widgetValue ?? ""} // ensures it's always a string
-            onBlur={handleInputBlur}
-            onChange={(e) => handleOnchangeTextBox(e)}
-            className={textInputcls}
+          <TextInput
+            widgetRef={widgetRef}
+            widgetValue={widgetValue}
+            handleOnchangeTextBox={handleOnchangeTextBox}
+            textInputcls={textInputcls}
+            currWidgetsDetails={currWidgetsDetails}
+            handleInputBlur={handleValidation}
           />
         );
       case cellsWidget:
         return (
-          <CellsWidget
-            isEnabled={true}
-            count={cellsValue.length}
-            height="100%"
-            value={cellsValue.join("")}
-            editable={true}
-            resizable={allowCellResize}
-            onChange={handleCellsInput}
-            onKeyDown={handleCellsKeyDown}
-            onBlur={handleCellsBlur}
-            onCellCountChange={allowCellResize ? handleCellResize : undefined}
-            inputRefs={cellRefs}
+          <CellsInput
+            cellsValue={widgetValue}
+            handleCellsInput={handleCellsInput}
+            textInputcls={textInputcls}
+            handleValidation={handleValidation}
             hint={hint}
+            count={currWidgetsDetails?.options?.cellCount || 0}
           />
         );
       case "dropdown":
         return (
           <select
-            className="op-select op-select-bordered op-select-sm focus:outline-none hover:border-base-content w-full text-xs"
+            className="op-select op-select-bordered op-select-sm focus:outline-none hover:border-base-content text-base-content w-full text-xs"
             id="myDropdown"
-            value={widgetValue}
+            value={widgetValue?.trim()}
             onChange={(e) => handleOnchangeTextBox(e)}
           >
             {/* Default/Title option */}
-            <option
-              // style={{ fontSize: fontSize, color: fontColor }}
-              value=""
-              disabled
-              hidden
-            >
-              {currWidgetsDetails?.options?.name}
+            <option value="" disabled hidden>
+              {/* {currWidgetsDetails?.options?.name} */}
+              {t("choose-one")}
             </option>
             {currWidgetsDetails?.options?.values?.map((data, ind) => (
-              <option key={ind} value={data}>
-                {data}
+              <option key={ind} value={data?.trim()}>
+                {data?.trim()}
               </option>
             ))}
           </select>
@@ -1456,10 +1468,11 @@ function WidgetsValueModal(props) {
       case "name":
         return (
           <input
+            ref={widgetRef}
             type="text"
             placeholder={hint || widgetTypeTranslation}
             value={widgetValue}
-            onBlur={handleInputBlur}
+            onBlur={handleValidation}
             onChange={(e) => handleOnchangeTextBox(e)}
             className={textInputcls}
           />
@@ -1467,10 +1480,11 @@ function WidgetsValueModal(props) {
       case "company":
         return (
           <input
+            ref={widgetRef}
             placeholder={hint || widgetTypeTranslation}
             value={widgetValue}
             type="text"
-            onBlur={handleInputBlur}
+            onBlur={handleValidation}
             onChange={(e) => handleOnchangeTextBox(e)}
             className={textInputcls}
           />
@@ -1478,8 +1492,9 @@ function WidgetsValueModal(props) {
       case "job title":
         return (
           <input
+            ref={widgetRef}
             type="text"
-            onBlur={handleInputBlur}
+            onBlur={handleValidation}
             placeholder={hint || widgetTypeTranslation}
             value={widgetValue}
             onChange={(e) => handleOnchangeTextBox(e)}
@@ -1488,66 +1503,77 @@ function WidgetsValueModal(props) {
         );
       case "date":
         return (
-          <div
-            className={`border-[1px] text-base-content data-[theme=opensigndark]:border-base-content data-[theme=opensigncss]:border-gray-300 rounded-[2px] p-1 px-3`}
-          >
-            <DatePicker
-              renderCustomHeader={({ date, changeYear, changeMonth }) => (
-                <div className="flex justify-start ml-2 ">
-                  <select
-                    className="bg-transparent outline-none"
-                    value={months[getMonth(date)]}
-                    onChange={({ target: { value } }) =>
-                      changeMonth(months.indexOf(value))
-                    }
-                  >
-                    {months.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="bg-transparent outline-none"
-                    value={getYear(date)}
-                    onChange={({ target: { value } }) => changeYear(value)}
-                  >
-                    {years.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              closeOnScroll={true}
-              selected={startDate}
-              onChange={(date) => handleOnDateChange(date)}
-              popperPlacement="top-end"
-              customInput={<ExampleCustomInput />}
-              dateFormat={
-                selectDate
-                  ? selectDate?.format
-                  : currWidgetsDetails?.options?.validation?.format
-                    ? currWidgetsDetails?.options?.validation?.format
-                    : "MM/dd/yyyy"
-              }
-              portalId="root-portal"
-            />
+          <div className="inline-flex flex-col items-center w-full">
+            {/* Input + format group */}
+            <div className="inline-flex flex-col items-center">
+              {/* Date input */}
+              <div className="border-[1px] opensigncss:border-gray-300 opensigndark:border-base-content text-base-content rounded-[2px] px-3 py-1 inline-flex">
+                <DatePicker
+                  renderCustomHeader={({ date, changeYear, changeMonth }) => (
+                    <div className="flex items-center gap-2 ml-2">
+                      <select
+                        className="bg-transparent outline-none"
+                        value={months[getMonth(date)]}
+                        onChange={({ target: { value } }) =>
+                          changeMonth(months.indexOf(value))
+                        }
+                      >
+                        {months.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="bg-transparent outline-none"
+                        value={getYear(date)}
+                        onChange={({ target: { value } }) => changeYear(value)}
+                      >
+                        {years.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  closeOnScroll
+                  selected={startDate}
+                  onChange={handleOnDateChange}
+                  popperPlacement="top-end"
+                  customInput={<ExampleCustomInput />}
+                  dateFormat={
+                    selectDate?.format ||
+                    currWidgetsDetails?.options?.validation?.format ||
+                    "MM/dd/yyyy"
+                  }
+                  portalId="root-portal"
+                />
+              </div>
+              {/* Format */}
+              <span className="mt-1 text-gray-300 uppercase">
+                {currWidgetsDetails?.options?.validation?.format}
+              </span>
+            </div>
+            {/* hint */}
+            {hint && (
+              <div className="mt-2 flex items-center gap-2 text-sm">
+                <span>{hint}</span>
+              </div>
+            )}
           </div>
         );
       case "email":
         return (
-          <>
-            <input
-              type="email"
-              onBlur={handleInputBlur}
-              placeholder={hint || widgetTypeTranslation}
-              value={widgetValue}
-              onChange={(e) => handleOnchangeTextBox(e)}
-              className={textInputcls}
-            />
-          </>
+          <input
+            ref={widgetRef}
+            type="email"
+            onBlur={handleValidation}
+            placeholder={hint || widgetTypeTranslation}
+            value={widgetValue}
+            onChange={(e) => handleOnchangeTextBox(e)}
+            className={textInputcls}
+          />
         );
       case radioButtonWidget:
         const radioLayout = currWidgetsDetails.options?.layout || "vertical";
@@ -1562,37 +1588,62 @@ function WidgetsValueModal(props) {
           <div
             className={`border-[1px] border-gray-300 rounded-[2px] pt-1 px-2.5 ${radioWrapperClass}`}
           >
-            {currWidgetsDetails?.options?.values.map((data, ind) => (
-              <div key={ind} className="text-base-content select-none-cls">
-                <label
-                  htmlFor={`radio-${currWidgetsDetails?.key + ind}`}
-                  className="cursor-pointer flex items-center text-sm gap-1"
-                >
-                  <input
-                    id={`radio-${currWidgetsDetails?.key + ind}`}
-                    className={`op-radio op-radio-xs mt-1`}
-                    type="radio"
-                    value={data}
-                    checked={handleRadioCheck(data)}
-                    onChange={(e) => {
-                      handleCheckRadio(e.target.value);
-                    }}
-                  />
-                  <span>{data}</span>
-                </label>
-              </div>
-            ))}
+            {currWidgetsDetails?.options?.values.map((data, ind) => {
+              const label =
+                typeof data === "string"
+                  ? data
+                  : data && typeof data === "object" && data.name != null
+                    ? String(data.name)
+                    : "";
+              return (
+                <div key={ind} className="text-base-content select-none-cls">
+                  <label
+                    // htmlFor={`radio-${currWidgetsDetails?.key + ind}`}
+                    className="cursor-pointer flex items-center text-sm gap-1"
+                  >
+                    <input
+                      id={`radio-${currWidgetsDetails?.key + ind}`}
+                      className={`op-radio op-radio-xs mt-1`}
+                      type="radio"
+                      value={label}
+                      checked={handleRadioCheck(label?.trim())}
+                      onChange={(e) => {
+                        handleCheckRadio(e.target.value?.trim());
+                      }}
+                    />
+                    <span>{label}</span>
+                  </label>
+                </div>
+              );
+            })}
           </div>
         );
       case textWidget:
         return (
-          <input
-            type="text"
-            placeholder={t("widgets-name.text")}
-            value={widgetValue ?? ""} //use an empty string "" as a default
-            onChange={(e) => handleOnchangeTextBox(e)}
-            className={textInputcls}
+          <TextInput
+            widgetRef={widgetRef}
+            widgetValue={widgetValue}
+            handleOnchangeTextBox={handleOnchangeTextBox}
+            textInputcls={textInputcls}
+            currWidgetsDetails={currWidgetsDetails}
           />
+        );
+      case drawWidget:
+        return (
+          <div>
+            <Draw
+              penColor={penColor}
+              canvasRef={canvasRef}
+              currWidgetsDetails={props?.currWidgetsDetails}
+              handleSignatureChange={handleSignatureChange}
+            />
+            <div className="flex flex-row justify-between mt-[10px]">
+              <PenColorComponent
+                penColor={penColor}
+                setPenColor={setPenColor}
+              />
+            </div>
+          </div>
         );
       default:
         return (
@@ -1607,14 +1658,15 @@ function WidgetsValueModal(props) {
 
   //function is used to check current widget is required or optional
   const handleCheckOptional = () => {
+
+    const effectiveStatus =
+      currWidgetsDetails?.options?.status ||
+      "required";
     let isRequired = false;
     const isCheckBox =
       !currWidgetsDetails.options?.isReadOnly &&
       currWidgetsDetails.type === "checkbox";
-    const isRadio =
-      !currWidgetsDetails?.options?.isReadOnly &&
-      currWidgetsDetails?.type === radioButtonWidget;
-    if (isCheckBox) {
+    if (isCheckBox && props?.role !== "prefill") {
       //get minimum required count if  exist
       const minCount =
         currWidgetsDetails?.options?.validation?.minRequiredCount;
@@ -1623,14 +1675,16 @@ function WidgetsValueModal(props) {
         isRequired = true;
       }
     } else {
-      isRequired = currWidgetsDetails.options?.status === "required";
+      isRequired = effectiveStatus === "required";
     }
     if (isRequired) {
       setIsOptional(false);
     }
   };
+
   //function is used to show how many field left and how many total widget
   const HandleRequiredField = () => {
+
     let widgetsPosition = [];
     if (uniqueId) {
       const currSignerWidget = xyPosition?.find(
@@ -1640,28 +1694,25 @@ function WidgetsValueModal(props) {
     } else {
       widgetsPosition = xyPosition;
     }
+
     //generate all nested level in single level
     const flatPlaceholder = widgetsPosition?.flatMap((page) =>
       page.pos
-        .filter((widget) => !widget.options?.isReadOnly)
-        .map((widget) => ({
-          widget,
-          pageNumber: page.pageNumber
-        }))
+        .filter((widget) => {
+          if (widget.options?.isReadOnly) return false;
+          return true;
+        })
+        .map((widget) => ({ widget, pageNumber: page.pageNumber }))
     );
     let totalWidget = 0;
     let alreadyValue = 0;
-    widgetsPosition?.forEach((page) => {
-      page.pos.forEach((field) => {
-        if (!field?.options?.isReadOnly) {
-          const isValueExist =
-            field.options?.response || field.options?.defaultValue;
-          totalWidget++;
-          if (isValueExist) {
-            alreadyValue++;
-          }
-        }
-      });
+    flatPlaceholder?.forEach(({ widget: field }) => {
+      const isValueExist =
+        field.options?.response || field.options?.defaultValue;
+      totalWidget++;
+      if (isValueExist) {
+        alreadyValue++;
+      }
     });
 
     const leftRequiredWidget = totalWidget - alreadyValue;
@@ -1675,7 +1726,7 @@ function WidgetsValueModal(props) {
       }
     }, []);
     return (
-      <span className="text-center text-[12px]">
+      <span className="text-center text-[12px] text-base-content">
         {t("required-mssg", { leftRequiredWidget, totalWidget })}
       </span>
     );
@@ -1694,7 +1745,7 @@ function WidgetsValueModal(props) {
     }
   };
   //function is used when user enter value in any textbox then check validation
-  const handleInputBlur = () => {
+  const handleValidation = () => {
     const validateType = currWidgetsDetails?.options?.validation?.type;
     let regexValidation;
     switch (validateType) {
@@ -1721,17 +1772,56 @@ function WidgetsValueModal(props) {
         break;
     }
   };
-  // console.log("currwidgetdetails ", currWidgetsDetails )
+
+  // `clearWidgetResponse` is used to clear response of signature, stamp, image, initials, draw widget based on id
+  const clearWidgetResponse = () => {
+    const widgetKey = currWidgetsDetails?.key;
+    const isOptional =
+      currWidgetsDetails?.options?.status === "optional" || false;
+    if (widgetKey && isOptional) {
+      const isPrefill = xyPosition.some(
+        ({ Id, Role }) => Id === uniqueId && Role === "prefill"
+      );
+      if (isPrefill) dispatch(setPrefillImg({ id: widgetKey, base64: "" }));
+
+      setXyPosition((prev) =>
+        prev.map((signer) => {
+          if (signer.Id !== uniqueId) return signer;
+
+          const idx = signer?.placeHolder?.findIndex((p) =>
+            p.pos?.some((w) => w.key === widgetKey)
+          );
+          if (idx === -1) return signer;
+
+          return {
+            ...signer,
+            placeHolder: clearResponse(widgetKey, signer.placeHolder, idx)
+          };
+        })
+      );
+    }
+  };
+
   //function too use on click on next/finish button then update modal UI according to current widgets
-  const handleClickOnNext = (isFinishDoc) => {
+  const handleClickOnNext = async (isFinishDoc) => {
     if (
-      ["signature", "stamp", "image", "initials"].includes(
+      ["signature", "stamp", "image", "initials", drawWidget].includes(
         currWidgetsDetails?.type
-      ) &&
-      (signature || image || myInitial || defaultSignImg)
+      )
     ) {
-      //function to save all type draw or image
-      handleSaveBtn();
+      if (
+        signature ||
+        image ||
+        myInitial ||
+        defaultSignImg ||
+        myStamp ||
+        typedSignature
+      ) {
+        //function to save all type draw or image
+        handleSaveBtn();
+      } else {
+        clearWidgetResponse();
+      }
     }
     if (isSave) {
       handleclose();
@@ -1744,19 +1834,21 @@ function WidgetsValueModal(props) {
     } else if (!isSave) {
       const widgetsPosition = xyPosition?.find((data) => data.Id === uniqueId);
       let nextWidgetDetails = null;
-      const editableWidgets = widgetsPosition?.placeHolder.flatMap((page) =>
-        page.pos
-          .filter((widget) => !widget.options?.isReadOnly)
-          .map((widget) => ({
-            widget,
-            pageNumber: page.pageNumber
-          }))
+      const editableWidgets = (widgetsPosition?.placeHolder ?? []).flatMap(
+        ({ pos = [], pageNumber }) =>
+          pos
+            .filter(({ options, key }) => {
+              if (
+                options?.isReadOnly
+              )
+                return false;
+              return true; // ← must be OUTSIDE the ee block
+            })
+            .map((widget) => ({ widget, pageNumber }))
       );
       //get current index of widget
       const currentIndex = editableWidgets.findIndex(
-        (item) =>
-          item.widget.key === currWidgetsDetails?.key &&
-          item.pageNumber === pageNumber
+        (item) => item.widget.key === currWidgetsDetails?.key
       );
       //get totoal widget length
       const totalItems = editableWidgets?.length;
@@ -1779,8 +1871,12 @@ function WidgetsValueModal(props) {
       }
 
       dispatch(setIsShowModal({ [nextWidgetDetails?.key]: true }));
-      props.setCurrWidgetsDetails(nextWidgetDetails);
+      props.setCurrWidgetsDetails({
+        ...nextWidgetDetails,
+        pageNumber: nextItem?.pageNumber
+      });
     }
+
   };
   //function is used to disable/enable save button
   const handleDisable = () => {
@@ -1788,33 +1884,40 @@ function WidgetsValueModal(props) {
       if (isOptional && uniqueId) {
         return false;
       } else if (
-        ["signature", "stamp", "image", "initials"].includes(
+        ["signature", "stamp", "image", "initials", drawWidget].includes(
           currWidgetsDetails?.type
         )
       ) {
-        if (
-          ((currWidgetsDetails?.type === "stamp" ||
-            currWidgetsDetails?.type === "image") &&
-            image) ||
-          (isTab === "draw" && signature) ||
-          (isTab === "uploadImage" && (signature || image)) ||
-          (isTab === "image" && image) ||
-          (isTab === "mysignature" && defaultSignImg) ||
-          (isTab === "type" && typedSignature)
-        ) {
-          return false;
-        } else {
-          return true;
+        const { type } = currWidgetsDetails || {};
+        //conditions based on widget type or active tab
+        const conditions = {
+          draw: !signature, // Draw tab requires a drawn signature
+          image: !image, // Upload tab requires an image
+          mysignature: !defaultSignImg, // My Signature tab requires a saved/default signature
+          type: !(typedSignature?.trim()?.length > 0), // Type tab requires non-empty typed signature
+          myinitials: !myInitial,
+          myStamp: !myStamp,
+          uploadStamp: !image
+        };
+        // First check conditions based on widget type
+        if (type && conditions.hasOwnProperty(type)) {
+          return conditions[type];
         }
+        //If type doesn't match, check based on active tab
+        if (isTab && conditions.hasOwnProperty(isTab)) {
+          return conditions[isTab];
+        }
+
+        return true; // default
       } else if (
         currWidgetsDetails?.type === "checkbox" &&
         selectedCheckbox?.length > 0
       ) {
         return false;
-      } else if (widgetValue) {
-        return false;
-      } else {
+      } else if (isEmptyValue(widgetValue)) {
         return true;
+      } else {
+        return false;
       }
     } else {
       return true;
@@ -1828,9 +1931,6 @@ function WidgetsValueModal(props) {
     }
     dispatch(setIsShowModal({}));
     dispatch(setLastIndex(""));
-    if (currWidgetsDetails?.type === textWidget && uniqueId) {
-      setUniqueId(tempSignerId);
-    }
   };
   //function is used to execute the finish button functionality
   const handleFinish = () => {
@@ -1846,11 +1946,15 @@ function WidgetsValueModal(props) {
   //'handleFinishButton' function is used to show finish button click on any widget if all required widgets have response
   const handleFinishButton = () => {
     const widgetsPosition = xyPosition?.find((data) => data.Id === uniqueId);
+
     //using 'flatMap' create all nested array in one level
     const editableWidgets = widgetsPosition?.placeHolder?.flatMap((page) =>
       page.pos
-        .filter((widget) => !widget.options?.isReadOnly)
-        .map((widget) => widget)
+        .filter((widget) => {
+          if (widget.options?.isReadOnly) return false;
+          return true; // ← outside ee block
+        })
+        .map((widget) => ({ ...widget, pageNumber: page.pageNumber }))
     );
     const getcurrentwidget = editableWidgets?.find(
       (data) => data?.key === currWidgetsDetails?.key
@@ -1859,8 +1963,12 @@ function WidgetsValueModal(props) {
       props?.setCurrWidgetsDetails(getcurrentwidget);
     }
     let isResponse = true;
-    //condition to check all required widgets have response or not then show finish buutton
+    //condition to check all required widgets have response or not then show finish button
     for (const data of editableWidgets) {
+      // Use the dynamic required status (respects require/optional logic actions).
+      const effectiveStatus =
+        data.options?.status ||
+        "required";
       if (data?.type === "checkbox") {
         const minCount = data.options?.validation?.minRequiredCount;
         const parseMin = minCount && parseInt(minCount);
@@ -1876,7 +1984,7 @@ function WidgetsValueModal(props) {
       } else if (
         !data.options.response &&
         !data?.options?.defaultValue &&
-        data.options?.status === "required"
+        effectiveStatus === "required"
       ) {
         isResponse = false;
         break;
@@ -1886,6 +1994,18 @@ function WidgetsValueModal(props) {
       setIsLastWidget(true);
     }
   };
+
+  const formatWidgetName = (widgetName) => {
+    if (!widgetName) return widgetTypeTranslation;
+
+    const parts = widgetName.split("-");
+    const [first] = parts;
+    const lastWord = parts.length > 1 ? `-${parts[parts.length - 1]}` : "";
+
+    return currWidgetsDetails?.type === first
+      ? `${first}${lastWord}`
+      : widgetName;
+  };
   return (
     <>
       <ModalUi
@@ -1894,20 +2014,29 @@ function WidgetsValueModal(props) {
         position="bottom"
       >
         <div className="h-[100%] p-[18px]">
+          {isLoader && (
+            <div className="absolute w-full h-full inset-0 flex justify-center items-center bg-base-content/30 z-50">
+              <Loader />
+            </div>
+          )}
           {isFinish ? (
             <>
               <div className="p-1 mt-3">
-                <span className="text-base">{t("finish-mssg")}</span>
+                <span className="text-base text-base-content">
+                  {
+                        t("finish-mssg")
+                  }
+                </span>
               </div>
               <div className="flex gap-3 items-center mt-4">
                 <button
                   type="button"
                   className="op-btn op-btn-primary op-btn-sm px-4"
-                  onClick={() => {
-                    handleFinish();
-                  }}
+                  onClick={() => handleFinish()}
                 >
-                  {t("finish")}
+                  {
+                        t("finish")
+                  }
                 </button>
                 <button
                   type="button"
@@ -1923,7 +2052,7 @@ function WidgetsValueModal(props) {
               <div>
                 <div className="relative inline-block">
                   <span className="text-base text-base-content">
-                    {currWidgetsDetails?.options?.name || widgetTypeTranslation}
+                    {formatWidgetName(currWidgetsDetails?.options?.name)}
                   </span>
                   {!isOptional && (
                     <span className="absolute -top-1 -right-2 text-red-500 text-lg">
@@ -1943,31 +2072,29 @@ function WidgetsValueModal(props) {
                 </div>
               </div>
               <div className="flex justify-between items-center text-center">
-                {!["checkbox", "dropdown", "date", "radio"].includes(
-                  currWidgetsDetails?.type
-                ) ? (
+                {showClearbtn ? (
                   <button
                     type="button"
                     className="op-btn op-btn-ghost op-btn-sm text-base-content mr-1"
-                    onClick={() => handleClear()}
+                    onClick={handleClear}
                   >
                     {t("clear")}
                   </button>
                 ) : (
                   <button
                     type="button"
-                    className="op-btn op-btn-ghost op-btn-sm mr-1 cursor-default"
+                    className="op-btn op-btn-ghost text-base-content op-btn-sm mr-1 cursor-default"
                   ></button>
                 )}
                 <div className="flex items-center gap-2">
-                  {!isSave && <HandleRequiredField />}
+                  {(!isSave || props?.role === "prefill") && (
+                    <HandleRequiredField />
+                  )}
                   {isSave ? (
                     <button
                       type="button"
                       className="op-btn op-btn-primary op-btn-sm"
-                      onClick={() => {
-                        handleClickOnNext();
-                      }}
+                      onClick={() => handleClickOnNext()}
                       disabled={handleDisable()}
                     >
                       {t("save")}
@@ -1977,10 +2104,7 @@ function WidgetsValueModal(props) {
                       type="button"
                       className="op-btn op-btn-primary op-btn-sm"
                       disabled={handleDisable()}
-                      onClick={() => {
-                        const isFinishDoc = true;
-                        handleClickOnNext(isFinishDoc);
-                      }}
+                      onClick={() => handleClickOnNext(true)} // isFinishDoc
                     >
                       {t("done")}
                     </button>
@@ -1988,9 +2112,7 @@ function WidgetsValueModal(props) {
                     <button
                       type="button"
                       className="op-btn op-btn-primary op-btn-sm text-xs md:text-sm"
-                      onClick={() => {
-                        handleClickOnNext();
-                      }}
+                      onClick={() => handleClickOnNext()}
                       disabled={handleDisable()}
                     >
                       {t("next-field")}

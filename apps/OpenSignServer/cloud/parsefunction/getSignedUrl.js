@@ -1,45 +1,63 @@
-import AWS from 'aws-sdk';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl as presign } from '@aws-sdk/s3-request-presigner';
 import { useLocal } from '../../Utils.js';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
-dotenv.config();
+import { isAuthenticated } from '../../utils/AuthUtils.js';
+dotenv.config({ quiet: true });
 
-export default function getPresignedUrl(
-  url,
-) {
-  if (url?.includes('files')) {
+function extractKeyFromUrl(url) {
+  // Create a new URL object
+  const parsedUrl = new URL(url);
+  // Get the pathname of the URL
+  const pathname = parsedUrl.pathname; // e.g. /mybucket/path/to/file.pdf (depends on baseUrl style)
+  // Extract the filename from the pathname
+  const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+  return filename;
+}
+
+function makeEndpoint(endpoint) {
+  if (!endpoint) return '';
+
+  if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+    return endpoint;
+  }
+
+  return `https://${endpoint}`;
+}
+
+function makeS3Client() {
+  const accessKeyId = process.env.DO_ACCESS_KEY_ID;
+
+  const secretAccessKey = process.env.DO_SECRET_ACCESS_KEY;
+
+  const region = process.env.DO_REGION;
+
+  const endpoint = makeEndpoint(process.env.DO_ENDPOINT);
+
+  return new S3Client({
+    region,
+    endpoint, // endpoint should be Url e.g. https://blr1.digitaloceanspaces.com)
+    credentials: { accessKeyId, secretAccessKey },
+  });
+}
+
+export default async function getPresignedUrl(url) {
+  if (url?.includes('/files/')) {
     return presignedlocalUrl(url);
   } else {
-    const credentials = {
-      accessKeyId:
-        process.env.DO_ACCESS_KEY_ID,
-      secretAccessKey:
-        process.env.DO_SECRET_ACCESS_KEY,
-    };
-    AWS.config.update({
-      credentials: credentials,
-      region:
-        process.env.DO_REGION,
-    });
-    const spacesEndpoint =
-      new AWS.Endpoint(process.env.DO_ENDPOINT);
+    const client = makeS3Client();
 
-    const s3 = new AWS.S3({ endpoint: spacesEndpoint, signatureVersion: 'v4' });
+    const bucket = process.env.DO_SPACE;
 
-    // Create a new URL object
-    const parsedUrl = new URL(url);
-    // Get the pathname of the URL
-    const pathname = parsedUrl.pathname;
-    // Extract the filename from the pathname
-    const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+    const key = extractKeyFromUrl(url);
+
+    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+    // Expires: 160 seconds
+    const expiresIn = 160;
 
     // presignedGETURL return presignedUrl with expires time
-    const presignedGETURL = s3.getSignedUrl('getObject', {
-      Bucket:
-        process.env.DO_SPACE,
-      Key: filename, //filename
-      Expires: 160, //time to expire in seconds
-    });
+    const presignedGETURL = await presign(client, command, { expiresIn });
     return presignedGETURL;
   }
 }
@@ -49,39 +67,33 @@ export async function getSignedUrl(request) {
     const docId = request.params.docId || '';
     const templateId = request.params.templateId || '';
     const url = request.params.url;
+
     if (docId || templateId) {
       try {
-        if (url?.includes('files')) {
+        if (url?.includes('/files/')) {
           return presignedlocalUrl(url);
-        } else if (
-          useLocal !== 'true'
-        ) {
+        } else if (useLocal !== 'true') {
           const query = new Parse.Query(docId ? 'contracts_Document' : 'contracts_Template');
           query.equalTo('objectId', docId ? docId : templateId);
           query.include('ExtUserPtr.TenantId');
           query.notEqualTo('IsArchive', true);
           const res = await query.first({ useMasterKey: true });
-          if (res) {
-            const _resDoc = JSON.parse(JSON.stringify(res));
-            if (_resDoc?.IsEnableOTP) {
-              if (!request?.user) {
-                throw new Parse.Error(
-                  Parse.Error.INVALID_SESSION_TOKEN,
-                  'User is not authenticated.'
-                );
-              } else {
-                const presignedUrl = getPresignedUrl(
-                  url,
-                );
-                return presignedUrl;
-              }
-            } else {
-              const presignedUrl = getPresignedUrl(
-                url,
+          if (!res) return url;
+
+          const _resDoc = res?.toJSON();
+          // Ensure user is authenticated if OTP is required
+          if (_resDoc?.IsEnableOTP) {
+            const isAuth = await isAuthenticated(request?.user);
+            if (!isAuth) {
+              throw new Parse.Error(
+                Parse.Error.INVALID_SESSION_TOKEN,
+                'User is not authenticated.'
               );
-              return presignedUrl;
             }
           }
+
+          const presignedUrl = await getPresignedUrl(url);
+          return presignedUrl;
         } else {
           return url;
         }
@@ -90,13 +102,14 @@ export async function getSignedUrl(request) {
         throw err;
       }
     } else {
-      if (!request?.user) {
+      const isAuth = await isAuthenticated(request?.user);
+      if (!isAuth) {
         throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'User is not authenticated.');
       } else {
-        if (url?.includes('files')) {
+        if (url?.includes('/files/')) {
           return presignedlocalUrl(url);
         } else if (useLocal !== 'true') {
-          const presignedUrl = getPresignedUrl(url);
+          const presignedUrl = await getPresignedUrl(url);
           return presignedUrl;
         } else {
           return url;
@@ -134,7 +147,7 @@ export function getSignedLocalUrl(fileUrl, expirationTimeInSeconds) {
 }
 
 export function presignedlocalUrl(signedUrl, expirationTimeInSeconds) {
-  if (signedUrl?.includes('files')) {
+  if (signedUrl?.includes('/files/')) {
     const fileUrl = signedUrl.split('?')?.[0];
     const secretKey = process.env.MASTER_KEY;
     const exp = expirationTimeInSeconds || 200;

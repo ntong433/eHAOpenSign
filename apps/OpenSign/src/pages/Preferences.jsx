@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
-import Title from "../components/Title";
+import React, { useEffect, useState } from "react";
 import Alert from "../primitives/Alert";
 import { useTranslation } from "react-i18next";
 import Loader from "../primitives/Loader";
@@ -12,34 +11,29 @@ import {
 } from "../constant/Utils";
 import Parse from "parse";
 import { Tooltip as ReactTooltip } from "react-tooltip";
-import TimezoneSelector from "../components/shared/fields/TimezoneSelector";
-import ReactQuill from "react-quill-new";
-import "../styles/quill.css";
-import EditorToolbar, {
-  module1,
-  module2,
-  formats
-} from "../components/pdf/EditorToolbar";
-import DateFormatSelector from "../components/shared/fields/DateFormatSelector";
+import TimezoneSelector from "../components/preferences/TimezoneSelector";
+import DateFormatSelector from "../components/preferences/DateFormatSelector";
+import FilenameFormatSelector from "../components/preferences/FilenameFormatSelector";
+import axios from "axios";
+import { withSessionValidation } from "../utils";
+import { WidgetsTab, EmailTab } from "../components/preferences/tabs";
+import {
+  setUserInfo,
+  setTenantInfo,
+  setLoader,
+  setTopLoader,
+  setAlertInfo
+} from "../redux/reducers/userReducer";
+import { useDispatch, useSelector } from "react-redux";
 
 const Preferences = () => {
   const appName =
     "OpenSign™";
   const { t } = useTranslation();
-  const editorRef = useRef();
-  const editorRefCom = useRef();
-  const Extand_Class = localStorage.getItem("Extand_Class");
-  const extClass = Extand_Class && JSON.parse(Extand_Class);
-  const [requestSubject, setRequestSubject] = useState("");
-  const [completionBody, SetCompletionBody] = useState("");
-  const [completionsubject, setCompletionSubject] = useState("");
-  const [requestBody, setRequestBody] = useState("");
-  const [defaultCompHtml, setDefaultCompHtml] = useState({});
-  const [tenantId, setTenantId] = useState("");
-  const [defaultReqHtml, setDefaultReqHtml] = useState({});
-  const [isalert, setIsAlert] = useState({ type: "success", msg: "" });
-  const [isTopLoader, setIsTopLoader] = useState(false);
-  const [isLoader, setIsLoader] = useState(false);
+  const dispatch = useDispatch();
+  const { isLoader, isTopLoader, alertInfo } = useSelector(
+    (state) => state.user
+  );
   const [signatureType, setSignatureType] = useState([]);
   const [errMsg, setErrMsg] = useState("");
   const [isNotifyOnSignatures, setIsNotifyOnSignatures] = useState();
@@ -56,23 +50,30 @@ const Preferences = () => {
   const [dateFormat, setDateFormat] = useState("MM/DD/YYYY");
   const [is12HourTime, setIs12HourTime] = useState(false);
   const [isLTVEnabled, setIsLTVEnabled] = useState(false);
-  const [isDefaultMail, setIsDefaultMail] = useState({
-    requestMail: false,
-    completionMail: false
-  });
+  const [fileNameFormat, setFileNameFormat] = useState("DOCNAME");
+  const [useNameAsSender, setUseNameAsSender] = useState(false);
+
   useEffect(() => {
     fetchSignType();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchSignType = async () => {
-    setIsTopLoader(true);
-    const EmailTab =
-      extClass?.[0]?.UserRole === "contracts_Admin"
-        ? [{ name: "email", title: t("email"), icon: "fa-light fa-envelope" }]
-        : [];
+  const showAlert = (type, msg) => {
+    dispatch(setAlertInfo({ type, msg }));
+    setTimeout(() => {
+      dispatch(setAlertInfo({ type: "success", msg: "" }));
+    }, 2000);
+  };
+
+  const fetchSignType = withSessionValidation(async () => {
+    dispatch(setTopLoader(true));
+    const EmailTab = [
+      { name: "email", title: t("email"), icon: "fa-light fa-envelope" }
+    ];
+
     const arr = [
       generaltab,
+      { name: "widgets", title: t("widgets"), icon: "fa-light fa-list" },
       ...EmailTab,
     ];
     setTab(arr);
@@ -83,70 +84,89 @@ const Preferences = () => {
         )
       );
       const tenantDetails = await getTenantDetails(user?.objectId);
-      await tenantEmailTemplate(tenantDetails);
+      dispatch(setTenantInfo(tenantDetails));
       const signatureType = tenantDetails?.SignatureType || [];
       const tenantSignTypes = signatureType?.filter((x) => x.enabled === true);
-      const getUser = await Parse.Cloud.run("getUserDetails");
-      if (getUser) {
-        const _getUser = JSON.parse(JSON.stringify(getUser));
-        const notifyOnSignatures =
-          _getUser?.NotifyOnSignatures !== undefined
-            ? _getUser?.NotifyOnSignatures
-            : true;
-        setIsNotifyOnSignatures(notifyOnSignatures);
-        setTimezone(_getUser?.Timezone || usertimezone);
-        if (tenantSignTypes?.length > 0) {
-          const signatureType = _getUser?.SignatureType || signatureTypes;
-          const updatedSignatureType = await handleSignatureType(
-            tenantSignTypes,
-            signatureType
-          );
-          setSignatureType(updatedSignatureType);
-        } else {
-          const SignatureType = _getUser?.SignatureType || signatureTypes;
-          setSignatureType(SignatureType);
+      const extUser = await axios.post(
+        `${localStorage.getItem("baseUrl")}functions/getUserDetails`,
+        {},
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "X-Parse-Application-Id": localStorage.getItem("parseAppId"),
+            "X-Parse-Session-Token": localStorage.getItem("accesstoken")
+          }
         }
-        const sendinorder =
-          _getUser?.SendinOrder !== undefined ? _getUser?.SendinOrder : true;
-        setSendinOrder(sendinorder);
-        const istourenabled =
-          _getUser?.IsTourEnabled !== undefined
-            ? _getUser?.IsTourEnabled
-            : true;
-        setIsTourEnabled(istourenabled);
-        const DateFormat =
-          _getUser?.DateFormat !== undefined
-            ? _getUser?.DateFormat
-            : "MM/DD/YYYY";
-        setDateFormat(DateFormat);
-        const is12Hr =
-          _getUser?.Is12HourTime !== undefined ? _getUser?.Is12HourTime : false;
-        setIs12HourTime(is12Hr);
-        const isLTVEnabled =
-          _getUser?.IsLTVEnabled !== undefined ? _getUser?.IsLTVEnabled : false;
-        setIsLTVEnabled(isLTVEnabled);
+      );
+      const getUser = extUser?.data?.result;
+      if (!getUser) {
+        setErrMsg(t("something-went-wrong-mssg"));
+        return;
       }
+      const _getUser = JSON.parse(JSON.stringify(getUser));
+      dispatch(setUserInfo(_getUser));
+      setIsNotifyOnSignatures(
+        _getUser?.NotifyOnSignatures !== undefined
+          ? _getUser?.NotifyOnSignatures
+          : true
+      );
+      setTimezone(_getUser?.Timezone || usertimezone);
+      if (tenantSignTypes?.length > 0) {
+        const signatureType = _getUser?.SignatureType || signatureTypes;
+        const updatedSignatureType = await handleSignatureType(
+          tenantSignTypes,
+          signatureType
+        );
+        setSignatureType(updatedSignatureType);
+      } else {
+        setSignatureType(_getUser?.SignatureType || signatureTypes);
+      }
+      setSendinOrder(
+        _getUser?.SendinOrder !== undefined ? _getUser?.SendinOrder : true
+      );
+      setIsTourEnabled(
+        _getUser?.IsTourEnabled !== undefined ? _getUser?.IsTourEnabled : true
+      );
+      setDateFormat(
+        _getUser?.DateFormat !== undefined ? _getUser?.DateFormat : "MM/DD/YYYY"
+      );
+      setIs12HourTime(
+        _getUser?.Is12HourTime !== undefined ? _getUser?.Is12HourTime : false
+      );
+      setIsLTVEnabled(
+        _getUser?.IsLTVEnabled !== undefined ? _getUser?.IsLTVEnabled : false
+      );
+      const downloadFilenameFormat =
+        _getUser?.DownloadFilenameFormat || "DOCNAME";
+      setFileNameFormat(downloadFilenameFormat);
+      setUseNameAsSender(_getUser?.UseNameAsSender === true);
     } catch (err) {
-      console.log("err while getting user details", err);
+      console.error("Error while getting user details: ", err);
       setErrMsg(t("something-went-wrong-mssg"));
     } finally {
-      setIsTopLoader(false);
+      dispatch(setTopLoader(false));
     }
-  };
+  });
 
   // `handleCheckboxChange` is trigger when user enable/disable checkbox of respective type
   const handleCheckboxChange = (index) => {
-    // Create a copy of the signatureType array
-    const updatedSignatureType = [...signatureType];
-    // Toggle the enabled value for the clicked item
-    updatedSignatureType[index].enabled = !updatedSignatureType[index].enabled;
-    // Update the state with the modified array
-    setSignatureType(updatedSignatureType);
+    // // Create a copy of the signatureType array
+    // const updatedSignatureType = [...signatureType];
+    // // Toggle the enabled value for the clicked item
+    // updatedSignatureType[index].enabled = !updatedSignatureType[index].enabled;
+    // // Update the state with the modified array
+    // setSignatureType(updatedSignatureType);
+
+    setSignatureType((prev) =>
+      prev.map((item, i) =>
+        i === index ? { ...item, enabled: !item.enabled } : item
+      )
+    );
   };
 
   // `handleSave` is used save updated value signature type
-  const handleSave = async () => {
-    setIsLoader(true);
+  const handleSave = withSessionValidation(async () => {
+    dispatch(setLoader(true));
     const Timezone = timezone || usertimezone;
     if (
       signatureType.length > 0 ||
@@ -160,15 +180,13 @@ const Preferences = () => {
           enabledSignTypes?.length === 1 &&
           enabledSignTypes[0]?.name === "default";
         if (enabledSignTypes.length === 0) {
-          setIsAlert({
-            type: "danger",
-            msg: t("at-least-one-signature-type")
-          });
+          showAlert("danger", t("at-least-one-signature-type"));
+          dispatch(setLoader(false));
+          return;
         } else if (isDefaultSignTypeOnly) {
-          setIsAlert({
-            type: "danger",
-            msg: t("expect-default-one-more-signature-type")
-          });
+          showAlert("danger", t("expect-default-one-signature-type"));
+          dispatch(setLoader(false));
+          return;
         } else {
           params = { ...params, SignatureType: signatureType };
         }
@@ -183,11 +201,13 @@ const Preferences = () => {
           IsTourEnabled: isTourEnabled,
           DateFormat: dateFormat,
           Is12HourTime: is12HourTime,
-          IsLTVEnabled: isLTVEnabled
+          IsLTVEnabled: isLTVEnabled,
+          DownloadFilenameFormat: fileNameFormat,
+          UseNameAsSender: useNameAsSender,
         };
         const updateRes = await Parse.Cloud.run("updatepreferences", params);
         if (updateRes) {
-          setIsAlert({ type: "success", msg: t("saved-successfully") });
+          showAlert("success", t("saved-successfully"));
           let extUser =
             localStorage.getItem("Extand_Class") &&
             JSON.parse(localStorage.getItem("Extand_Class"))?.[0];
@@ -197,200 +217,33 @@ const Preferences = () => {
             extUser.IsTourEnabled = isTourEnabled;
             extUser.DateFormat = dateFormat;
             extUser.Is12HourTime = is12HourTime;
+            extUser.DownloadFilenameFormat = fileNameFormat;
+            extUser.UseNameAsSender = useNameAsSender;
             const _extUser = JSON.parse(JSON.stringify(extUser));
             localStorage.setItem("Extand_Class", JSON.stringify([_extUser]));
           }
         }
       } catch (err) {
-        console.log("Error updating signature type", err);
-        setIsAlert({ type: "danger", msg: err.message });
+        console.error("Error updating signature type: ", err);
+        showAlert("danger", err.message);
       }
-
-      setTimeout(() => setIsAlert({ type: "success", msg: "" }), 1500);
-      setIsLoader(false);
+      dispatch(setLoader(false));
     }
-  };
+  });
 
   // `handleNotifySignChange` is trigger when user change radio of notify on signatures
   const handleNotifySignChange = (value) => {
     setIsNotifyOnSignatures(value);
   };
-  const tenantEmailTemplate = async (tenantRes) => {
-    if (tenantRes === "user does not exist!") {
-      alert(t("user-not-exist"));
-    } else if (tenantRes) {
-      setIsLoader(true);
-      const updateRes = tenantRes;
-      setTenantId(updateRes?.objectId);
-      const defaultRequestBody = `<p>Hi {{receiver_name}},</p><br><p>We hope this email finds you well. {{sender_name}}&nbsp;has requested you to review and sign&nbsp;{{document_title}}.</p><p>Your signature is crucial to proceed with the next steps as it signifies your agreement and authorization.</p><br><p><a href='{{signing_url}}' rel='noopener noreferrer' target='_blank'>Sign here</a></p><br><br><p>If you have any questions or need further clarification regarding the document or the signing process, please contact the sender.</p><br><p>Thanks</p><p> Team ${appName}</p><br>`;
-      if (updateRes?.RequestBody) {
-        setRequestBody(updateRes?.RequestBody);
-        setRequestSubject(updateRes?.RequestSubject);
-      } else {
-        setRequestBody(defaultRequestBody);
-        setRequestSubject(
-          `{{sender_name}} has requested you to sign {{document_title}}`
-        );
-        setIsDefaultMail((prev) => ({ ...prev, requestMail: true }));
-      }
-      setDefaultReqHtml({
-        body: defaultRequestBody,
-        subject: `{{sender_name}} has requested you to sign {{document_title}}`
-      });
-      const defaultCompletionBody = `<p>Hi {{sender_name}},</p><br><p>All parties have successfully signed the document {{document_title}}. Kindly download the document from the attachment.</p><br><p>Thanks</p><p> Team ${appName}</p><br>`;
-      if (updateRes?.CompletionBody) {
-        SetCompletionBody(updateRes?.CompletionBody);
-        setCompletionSubject(updateRes?.CompletionSubject);
-      } else {
-        SetCompletionBody(defaultCompletionBody);
-        setCompletionSubject(
-          `Document {{document_title}} has been signed by all parties`
-        );
-        setIsDefaultMail((prev) => ({ ...prev, completionMail: true }));
-      }
-      setDefaultCompHtml({
-        body: defaultCompletionBody,
-        subject: `Document {{document_title}} has been signed by all parties`
-      });
-      setIsLoader(false);
-    }
-  };
-  //function to save completion email template
-  const handleSaveCompletionEmail = async (e) => {
-    e.preventDefault();
-    try {
-      setIsLoader(true);
-      const replacedHtmlBody = completionBody.replace(/"/g, "'");
-      const htmlBody = `<html><head><meta http-equiv='Content-Type' content='text/html; charset=UTF-8' /></head><body>${replacedHtmlBody}</body></html>`;
-      const updateTenant = await Parse.Cloud.run("updatetenant", {
-        tenantId: tenantId,
-        details: {
-          CompletionBody: htmlBody,
-          CompletionSubject: completionsubject
-        }
-      });
-      if (updateTenant) {
-        const updateRes = JSON.parse(JSON.stringify(updateTenant));
-        SetCompletionBody(updateRes?.CompletionBody);
-        setCompletionSubject(updateRes?.CompletionSubject);
-        setIsAlert({ type: "success", msg: t("saved-successfully") });
-        setTimeout(() => setIsAlert({ type: "", msg: "" }), 1500);
-      }
-    } catch (err) {
-      console.log("Err", err);
-      setIsAlert({ type: "danger", msg: t("something-went-wrong-mssg") });
-      setTimeout(() => setIsAlert({ type: "", msg: "" }), 1500);
-    } finally {
-      setIsLoader(false);
-    }
-  };
-  //function to save request email template
-  const handleSaveRequestEmail = async (e) => {
-    e.preventDefault();
-    try {
-      setIsLoader(true);
-      const replacedHtmlBody = requestBody.replace(/"/g, "'");
-      const htmlBody = `<html><head><meta http-equiv='Content-Type' content='text/html; charset=UTF-8' /></head><body>${replacedHtmlBody}</body></html>`;
-      const updateTenant = await Parse.Cloud.run("updatetenant", {
-        tenantId: tenantId,
-        details: {
-          RequestBody: htmlBody,
-          RequestSubject: requestSubject
-        }
-      });
-      if (updateTenant) {
-        const updateRes = JSON.parse(JSON.stringify(updateTenant));
-        setRequestBody(updateRes?.RequestBody);
-        setRequestSubject(updateRes?.RequestSubject);
-        let extUser =
-          localStorage.getItem("Extand_Class") &&
-          JSON.parse(localStorage.getItem("Extand_Class"))?.[0];
-        if (extUser && extUser?.objectId) {
-          extUser.TenantId.RequestBody = updateRes?.RequestBody;
-          extUser.TenantId.RequestSubject = updateRes?.RequestSubject;
-          const _extUser = JSON.parse(JSON.stringify(extUser));
-          localStorage.setItem("Extand_Class", JSON.stringify([_extUser]));
-        }
-        setIsAlert({ type: "success", msg: t("saved-successfully") });
-        setTimeout(() => setIsAlert({ type: "", msg: "" }), 1500);
-      }
-    } catch (err) {
-      console.log("Err", err);
-      setIsAlert({ type: "danger", msg: t("something-went-wrong-mssg") });
-      setTimeout(() => setIsAlert({ type: "", msg: "" }), 1500);
-    } finally {
-      setIsLoader(false);
-    }
-  };
 
-  //function to use reset form
-  const handleReset = async (request, completion) => {
-    let extUser =
-      localStorage.getItem("Extand_Class") &&
-      JSON.parse(localStorage.getItem("Extand_Class"))?.[0];
-    handleModifyMail(request);
-    if (request && !isDefaultMail?.requestMail) {
-      setRequestBody(defaultReqHtml?.body);
-      setRequestSubject(defaultReqHtml?.subject);
-      try {
-        await Parse.Cloud.run("updatetenant", {
-          tenantId: tenantId,
-          details: { RequestBody: "", RequestSubject: "" }
-        });
-        if (extUser && extUser?.objectId) {
-          extUser.TenantId.RequestBody = "";
-          extUser.TenantId.RequestSubject = "";
-          const _extUser = JSON.parse(JSON.stringify(extUser));
-          localStorage.setItem("Extand_Class", JSON.stringify([_extUser]));
-        }
-      } catch (err) {
-        console.log("Err in reseting request mail", err);
-      }
-    } else if (completion && !isDefaultMail?.completionMail) {
-      setCompletionSubject(defaultCompHtml?.subject);
-      SetCompletionBody(defaultCompHtml?.body);
-      try {
-        await Parse.Cloud.run("updatetenant", {
-          tenantId: tenantId,
-          details: { CompletionBody: "", CompletionSubject: "" }
-        });
-        if (extUser && extUser?.objectId) {
-          extUser.TenantId.CompletionBody = "";
-          extUser.TenantId.CompletionSubject = "";
-          const _extUser = JSON.parse(JSON.stringify(extUser));
-          localStorage.setItem("Extand_Class", JSON.stringify([_extUser]));
-        }
-      } catch (err) {
-        console.log("Err in reseting completion mail", err);
-      }
-    }
-  };
-  //function for handle ontext change and save again text in delta
-  const handleOnchangeRequest = () => {
-    if (editorRef.current) {
-      const html = editorRef.current.editor.root.innerHTML;
-      setRequestBody(html);
-    }
-  };
-  const handleOnchangeCompletion = () => {
-    if (editorRefCom.current) {
-      const html = editorRefCom.current.editor.root.innerHTML;
-      SetCompletionBody(html);
-    }
-  };
 
   const handleTourInput = () => setIsTourEnabled(!isTourEnabled);
   const handleSendinOrderInput = () => setSendinOrder(!sendinOrder);
   const tabName = (ind) => tab.find((t, i) => i === ind)?.name;
-  const handleModifyMail = (mode) => {
-    mode === "request"
-      ? setIsDefaultMail((p) => ({ ...p, requestMail: !p?.requestMail }))
-      : setIsDefaultMail((p) => ({ ...p, completionMail: !p?.completionMail }));
-  };
+
   return (
     <React.Fragment>
-      <Title title={t("Preferences")} />
-      {isalert.msg && <Alert type={isalert.type}>{isalert.msg}</Alert>}
+      {alertInfo.msg && <Alert type={alertInfo.type}>{alertInfo.msg}</Alert>}
       {isTopLoader ? (
         <div className="flex justify-center items-center h-screen">
           <Loader />
@@ -409,10 +262,7 @@ const Preferences = () => {
                 </div>
               )}
               <h1 className="ml-4 mt-3 text-lg mb-2 font-semibold text-base-content">
-                {appName} {t("Preferences")}{" "}
-                <span>
-                  <Tooltip message={`${appName} ${t("Preferences")}`} />
-                </span>
+                {appName} {t("Preferences")}
               </h1>
               <div className="flex justify-center items-center mt-2">
                 <div
@@ -424,20 +274,25 @@ const Preferences = () => {
                       onClick={() => setactiveTab(ind)}
                       key={ind}
                       role="tab"
-                      className={`${activeTab === ind ? "op-tab-active" : ""} op-tab text-xs md:text-base pb-2 md:pb-0 transition-all `}
+                      className={` op-tab text-xs md:text-base pb-2 md:pb-0 transition-all`}
                       aria-selected={activeTab === ind}
                       aria-controls={`panel-${tabData.title}`}
                     >
                       <i className={tabData.icon}></i>
-                      <span className="ml-1 md:ml-2">{tabData.title}</span>
+                      <span
+                        className={`${activeTab === ind ? "block" : "hidden"} md:block ml-1`}
+                        title={tabData?.title}
+                      >
+                        {tabData.title}
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
               <div
-                id="panel-general"
+                id={`panel-${activeTab}`}
                 className="px-6 pt-4 pb-6"
-                aria-labelledby="tab-general"
+                aria-labelledby={`tab-${activeTab}`}
                 role="tabpanel"
               >
                 {tabName(activeTab) === "general" && (
@@ -471,7 +326,9 @@ const Preferences = () => {
                               <div className="p-[5px] ml-2">
                                 <ol className="list-disc">
                                   <li>
-                                    <span className="font-bold">Draw: </span>
+                                    <span className="font-bold">
+                                      {t("draw")}:{" "}
+                                    </span>
                                     <span>
                                       {t("allowed-signature-types-help.l1")}
                                     </span>
@@ -483,7 +340,9 @@ const Preferences = () => {
                                     </span>
                                   </li>
                                   <li>
-                                    <span className="font-bold">Upload: </span>
+                                    <span className="font-bold">
+                                      {t("upload")}:{" "}
+                                    </span>
                                     <span>
                                       {t("allowed-signature-types-help.l3")}
                                     </span>
@@ -663,6 +522,47 @@ const Preferences = () => {
                         </div>
                       </div>
 
+
+                      <div className="mb-6">
+                        <label
+                          htmlFor="sender-name-toggle"
+                          className="text-[14px] mb-[0.7rem] font-medium"
+                        >
+                          {t("use-name-as-sender")}
+                        </label>
+                        <a
+                          data-tooltip-id="sender-name-toggle-tooltip"
+                          className="ml-1"
+                        >
+                          <sup>
+                            <i className="fa-light fa-question rounded-full border-[#33bbff] text-[#33bbff] text-[13px] border-[1px] py-[1.5px] px-[4px]"></i>
+                          </sup>
+                        </a>
+                        <ReactTooltip
+                          id="sender-name-toggle-tooltip"
+                          className="z-[999]"
+                        >
+                          <div className="max-w-[200px] md:max-w-[450px] text-[13px] font-medium">
+                            <p>
+                              {t("use-name-as-sender-help", {
+                                appName: appName
+                              })}
+                            </p>
+                          </div>
+                        </ReactTooltip>
+                        <div className="cursor-pointer relative block items-center mb-0 ml-1">
+                          <input
+                            id="sender-name-toggle"
+                            type="checkbox"
+                            className="op-toggle checked:[--tglbg:#3368ff] transition-all checked:text-white"
+                            checked={useNameAsSender}
+                            onChange={() =>
+                              setUseNameAsSender((prevValue) => !prevValue)
+                            }
+                          />
+                        </div>
+                      </div>
+
                       {/* Enable Tour Section */}
                       <div className="mb-6">
                         <label className="text-[14px] mb-[0.7rem] font-medium">
@@ -761,6 +661,12 @@ const Preferences = () => {
                           setDateFormat={setDateFormat}
                         />
                       </div>
+                      <div className="mb-6">
+                        <FilenameFormatSelector
+                          fileNameFormat={fileNameFormat}
+                          setFileNameFormat={setFileNameFormat}
+                        />
+                      </div>
                     </div>
                     {/* Save Button - Full Width */}
                     <div className="md:col-span-12 flex justify-start mt-2">
@@ -773,168 +679,8 @@ const Preferences = () => {
                     </div>
                   </div>
                 )}
-                {tabName(activeTab) === "email" && (
-                  <div className="flex flex-col mb-4">
-                    <div className="flex flex-col">
-                      <h1 className="text-[14px] mb-[0.7rem] font-medium">
-                        {t("request-email")}
-                      </h1>
-                      <div className="relative mt-2 mb-4">
-                        {
-                            isDefaultMail?.requestMail && (
-                              <div className="absolute backdrop-blur-[2px] flex w-full h-full justify-center items-center bg-black/10 rounded-box select-none z-20">
-                                <button
-                                  onClick={() => handleModifyMail("request")}
-                                  className="op-btn op-btn-primary shadow-lg"
-                                >
-                                  Modify
-                                </button>
-                              </div>
-                            )
-                        }
-                        <form
-                          onSubmit={handleSaveRequestEmail}
-                          className="p-3 border-[1px] border-base-content rounded-box"
-                        >
-                          <div className="text-lg font-normal">
-                            <label className="text-sm">
-                              {t("subject")}{" "}
-                              <Tooltip
-                                id={"request-sub-tooltip"}
-                                message={`${t("variables-use")}: {{sender_name}} {{document_title}}`}
-                              />
-                            </label>
-                            <input
-                              required
-                              value={requestSubject}
-                              onChange={(e) =>
-                                setRequestSubject(e.target.value)
-                              }
-                              placeholder={`{{sender_name}} ${t("send-to-sign")} {{document_title}}`}
-                              className="w-full op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content text-xs"
-                            />
-                          </div>
-                          <div className="text-lg font-normal py-2">
-                            <label className="text-sm mt-3">
-                              {t("body")}{" "}
-                              <Tooltip
-                                id={"request-body-tooltip"}
-                                message={`${t("variables-use")}: {{sender_name}} {{document_title}}`}
-                              />
-                            </label>
-                            <EditorToolbar containerId="toolbar1" />
-                            <ReactQuill
-                              theme="snow"
-                              value={requestBody}
-                              placeholder="add body of email"
-                              // onChangeSelection={handleTextSelection} // Listen for text selection
-                              ref={editorRef}
-                              modules={module1}
-                              formats={formats}
-                              onChange={handleOnchangeRequest}
-                            />
-                          </div>
-                          <div className="flex items-center mt-3 gap-2">
-                            <button
-                              disabled={!requestBody || !requestSubject}
-                              className="op-btn op-btn-primary"
-                              type="submit"
-                            >
-                              {t("save")}
-                            </button>
-                            <button
-                              type="button"
-                              className="op-btn op-btn-secondary"
-                              onClick={() => handleReset("request")}
-                            >
-                              {t("reset")}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                      <h1 className="text-[14px] mb-[0.7rem] font-medium">
-                        {t("completion-email")}
-                      </h1>
-                      <div className="relative my-2">
-                        {
-                            isDefaultMail?.completionMail && (
-                              <div className="absolute backdrop-blur-[2px] flex w-full h-full justify-center items-center bg-black/10 rounded-box select-none z-20">
-                                <button
-                                  onClick={() => handleModifyMail("completion")}
-                                  className="op-btn op-btn-primary shadow-lg"
-                                >
-                                  Modify
-                                </button>
-                              </div>
-                            )
-                        }
-                        <form
-                          onSubmit={handleSaveCompletionEmail}
-                          className="p-3 border-[1px] border-base-content rounded-box"
-                        >
-                          <div className="text-lg font-normal">
-                            <label className="text-sm">
-                              {t("subject")}{" "}
-                              <Tooltip
-                                id={"complete-sub-tooltip"}
-                                message={`${t("variables-use")}:{{sender_name}} {{document_title}}`}
-                              />
-                            </label>
-                            <input
-                              required
-                              value={completionsubject}
-                              onChange={(e) =>
-                                setCompletionSubject(e.target.value)
-                              }
-                              placeholder={`{{sender_name}}  ${t("send-to-sign")} {{document_title}}`}
-                              className="w-full op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content text-xs"
-                            />
-                          </div>
-                          <div className="text-lg font-normal py-2">
-                            <label className="text-sm mt-3">
-                              {t("body")}{" "}
-                              <Tooltip
-                                id={"complete-body-tooltip"}
-                                message={`${t("variables-use")}:{{sender_name}} {{document_title}} {{signing_url}}`}
-                              />
-                            </label>
-                            <EditorToolbar containerId="toolbar2" />
-                            <ReactQuill
-                              theme="snow"
-                              value={completionBody}
-                              placeholder="add body of email "
-                              // onChangeSelection={handleTextSelection} // Listen for text selection
-                              ref={editorRefCom}
-                              modules={module2}
-                              formats={formats}
-                              onChange={handleOnchangeCompletion}
-                            />
-                          </div>
-                          <div className="flex items-center mt-3 gap-2">
-                            <button
-                              disabled={!completionBody || !completionsubject}
-                              className="op-btn op-btn-primary"
-                              type="submit"
-                            >
-                              {t("save")}
-                            </button>
-                            <button
-                              type="button"
-                              className="op-btn op-btn-secondary"
-                              onClick={() => handleReset(null, "completion")}
-                            >
-                              {t("reset")}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {tabName(activeTab) === "security" && (
-                  <>
-                  </>
-                )}
+                {tabName(activeTab) === "widgets" && <WidgetsTab />}
+                {tabName(activeTab) === "email" && <EmailTab />}
               </div>
             </div>
           )}

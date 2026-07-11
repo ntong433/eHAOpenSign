@@ -1,8 +1,9 @@
-import React, { Suspense, lazy } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { lazyWithRetry } from "../../utils";
 import { useTranslation } from "react-i18next";
-const DashboardButton = lazy(() => import("./DashboardButton"));
-const DashboardCard = lazy(() => import("./DashboardCard"));
-const DashboardReport = lazy(() => import("./DashboardReport"));
+const DashboardButton = lazyWithRetry(() => import("./DashboardButton"));
+const DashboardCard = lazyWithRetry(() => import("./DashboardCard"));
+const DashboardReport = lazyWithRetry(() => import("./DashboardReport"));
 const buttonList = [
   {
     label: "Sign yourself",
@@ -19,6 +20,7 @@ const buttonList = [
 ];
 const GetDashboard = (props) => {
   const { t } = useTranslation();
+
   const Button = ({ label, redirectId, redirectType, icon }) => (
     <DashboardButton
       Icon={icon}
@@ -58,7 +60,9 @@ const GetDashboard = (props) => {
           <div data-tut={col.widget.data.tourSection}>
             <Suspense fallback={<div>please wait</div>}>
               <div className="mb-3 md:mb-0">
-                <DashboardReport Record={col.widget} />
+                <DashboardReport
+                  Record={col.widget}
+                />
               </div>
             </Suspense>
           </div>
@@ -92,7 +96,9 @@ const GetDashboard = (props) => {
         return (
           <Suspense fallback={<div>please wait</div>}>
             <div className="mb-3 md:mb-0">
-              <DashboardReport Record={col.widget} />
+              <DashboardReport
+                Record={col.widget}
+              />
             </div>
           </Suspense>
         );

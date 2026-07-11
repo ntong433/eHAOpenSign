@@ -1,5 +1,6 @@
-import React, { useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
+import { useTranslation } from "react-i18next";
 import {
   color,
   darkenColor,
@@ -10,15 +11,16 @@ import {
 const cursor =
   "cursor-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAsTAAALEwEAmpwYAAAASElEQVR4nGNgwAMkJSUbpKSkOvCpIaT5PxSTbogUQjMYMwxeIIXmVFIxA8UGDDyQGg0DnIDi6JKUlCxHMqCeZAOghjSAMD5FAKfeaURdUFxCAAAAAElFTkSuQmCC'),_pointer]";
 const RecipientList = (props) => {
+  const { t } = useTranslation();
   const [animationParent] = useAutoAnimate();
   const [isHover, setIsHover] = useState();
+  const [isPrefill, setIsPrefill] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   //function for onhover signer name change background color
   const inputRef = useRef(null);
   const isWidgetExist = (Id) => {
     return props.signerPos.some((x) => x.Id === Id && x.placeHolder);
   };
-
   //handle drag start
   const handleDragStart = (e, id) => {
     // `e.dataTransfer.setData('text/plain')`is used to set the data to be transferred during a drag operation.
@@ -66,7 +68,7 @@ const RecipientList = (props) => {
     props?.setIsSelectId(index);
     props?.setUniqueId(remainingItems[index]?.Id);
     props?.setRoleName(remainingItems[index]?.Role);
-    props?.setBlockColor(obj.blockColor);
+    props.setBlockColor?.(obj?.blockColor);
     //change order of placeholder's list using sorting method
     //`remainingItems` is correct order of signers after change order
     const changeOrderSignerList = props?.signerPos.sort((a, b) => {
@@ -80,9 +82,43 @@ const RecipientList = (props) => {
     });
     props?.setSignerPos(changeOrderSignerList);
   };
+  const handleSelectRecipient = (e, index, obj, prefill) => {
+    e.preventDefault();
+    props?.setIsSelectId(index);
+    props?.setUniqueId(obj.Id);
+    props?.setRoleName(obj.Role);
+    props.setBlockColor?.(obj?.blockColor);
+    props?.handleModal && props?.handleModal();
+    setIsPrefill(prefill ?? false);
+    props.setIsTour && props?.setIsTour(false);
+  };
+  const isSelected = (ind) => {
+    const isUserSelected =
+      (!isMobile && isHover === ind) ||
+      (!isPrefill && props.isSelectListId === ind);
+    return isUserSelected;
+  };
   return (
     <>
-      {props.signersdata?.length > 0 &&
+      {props?.prefillSigner?.length > 0 &&
+        props?.prefillSigner?.map((obj, ind) => (
+          <div
+            key={ind}
+            data-tut="prefillTour"
+            className={`${
+              props.uniqueId === obj.Id
+                ? "op-bg-primary text-white"
+                : "transparent text-base-content"
+            } cursor-pointer px-2 py-1 m-1 mb-2 border-[1px] gap-1 rounded-xl flex justify-center items-center op-border-primary text-[12px] font-bold whitespace-nowrap text-ellipsis`}
+            onClick={(e) => handleSelectRecipient(e, ind, obj, true)}
+          >
+            <i
+              className={`${props.uniqueId === obj.Id ? "bg-white op-text-primary" : "op-bg-primary text-white"} w-[20px] h-[20px] flex justify-center items-center text-[10px] fa-light fa-signature rounded-full`}
+            ></i>
+            <span>{obj.Name}</span>
+          </div>
+        ))}
+      {props.signersdata.length > 0 &&
         props.signersdata.map((obj, ind) => {
           return (
             <div
@@ -118,16 +154,7 @@ const RecipientList = (props) => {
                       : color[ind % color.length]
                     : "transparent"
               }}
-              onClick={(e) => {
-                e.preventDefault();
-                props.setIsSelectId(ind);
-                props.setUniqueId(obj.Id);
-                props.setRoleName(obj.Role);
-                props.setBlockColor(obj?.blockColor);
-                if (props.handleModal) {
-                  props.handleModal();
-                }
-              }}
+              onClick={(e) => handleSelectRecipient(e, ind, obj)}
             >
               <div className="flex flex-row items-center w-full overflow-hidden pr-2">
                 <div
@@ -142,38 +169,22 @@ const RecipientList = (props) => {
                     {isWidgetExist(obj.Id) ? (
                       <i className="fa-light fa-check"></i>
                     ) : (
-                      <>
-                        {obj.Name
-                          ? getFirstLetter(obj.Name)
-                          : getFirstLetter(obj.Role)}
-                      </>
+                      <>{getFirstLetter(obj?.Name ?? obj?.Role)}</>
                     )}
                   </span>
                 </div>
                 <div
-                  className={`${
-                    obj.Name ? "flex-col" : "flex-row"
+                  className={`${obj.Name ? "flex-col" : "flex-row"} ${
+                    isSelected(ind) ? "text-[#424242]" : "text-base-content"
                   } flex overflow-hidden flex-grow-0`}
                 >
                   {obj.Name ? (
-                    <span
-                      className={`${
-                        (!isMobile && isHover === ind) ||
-                        props.isSelectListId === ind
-                          ? "text-[#424242]"
-                          : "text-base-content"
-                      } text-[12px] font-bold truncate whitespace-nowrap`}
-                    >
+                    <span className="text-[12px] font-bold truncate whitespace-nowrap">
                       {obj.Name}
                     </span>
                   ) : (
                     <span
-                      className={`${
-                        (!isMobile && isHover === ind) ||
-                        props.isSelectListId === ind
-                          ? "text-[#424242]"
-                          : "text-base-content"
-                      } text-[12px] font-bold truncate whitespace-nowrap cursor-pointer`}
+                      className="text-[12px] font-bold truncate whitespace-nowrap cursor-pointer"
                       onClick={() => {
                         setIsEdit({ [obj.Id]: true });
                         props.setRoleName(obj.Role);
@@ -204,14 +215,7 @@ const RecipientList = (props) => {
                     </span>
                   )}
                   {obj.Name && (
-                    <span
-                      className={` ${
-                        (!isMobile && isHover === ind) ||
-                        props.isSelectListId === ind
-                          ? "text-[#424242]"
-                          : "text-base-content"
-                      } text-[10px] font-medium truncate whitespace-nowrap`}
-                    >
+                    <span className="text-[10px] font-medium truncate whitespace-nowrap">
                       {obj?.Role || obj?.Email}
                     </span>
                   )}
@@ -247,18 +251,13 @@ const RecipientList = (props) => {
                   </div>
                 </div>
               )}
-              {props.handleDeleteUser && (
+              {props.handleDeleteUser && obj?.Role !== "prefill" && (
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
                     props.handleDeleteUser(obj.Id);
                   }}
-                  className={`${
-                    (!isMobile && isHover === ind) ||
-                    props.isSelectListId === ind
-                      ? "text-[#424242]"
-                      : "text-base-content"
-                  } cursor-pointer`}
+                  className={`${isSelected(ind) ? "text-[#424242]" : "text-base-content"} cursor-pointer`}
                 >
                   <i className="fa-light fa-trash-can 2xl:text-[22px]"></i>
                 </div>

@@ -1,13 +1,13 @@
-import React, { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import Parse from "parse";
-import ReportTable from "../../primitives/GetReportDisplay";
+import DocumentsReport from "../../reports/document/DocumentsReport";
 import reportJson from "../../json/ReportJson";
 import axios from "axios";
 import Loader from "../../primitives/Loader";
 import { useTranslation } from "react-i18next";
+import { withSessionValidation } from "../../utils";
 function DashboardReport(props) {
   const { t } = useTranslation();
-  // console.log("props ", props)
   const [List, setList] = useState([]);
   const [isLoader, setIsLoader] = useState(true);
   const [reportName, setReportName] = useState("");
@@ -47,7 +47,7 @@ function DashboardReport(props) {
     // eslint-disable-next-line
   }, [isNextRecord]);
 
-  const handleSearchChange = async (e) => {
+  const handleSearchChange = withSessionValidation(async (e) => {
     const term = e.target.value.toLowerCase();
     setSearchTerm(term);
     if (debounceTimer.current) {
@@ -83,7 +83,7 @@ function DashboardReport(props) {
       }
     }, 300);
     setIsSearchResult(false);
-  };
+  });
 
   const handleSearchPaste = (e) => {
     setTimeout(() => {
@@ -99,96 +99,95 @@ function DashboardReport(props) {
     };
   }, []);
 
-  const getReportData = async (
-    id,
-    skipUserRecord = 0,
-    limit = 20,
-    term = searchTerm
-  ) => {
-    setIsLoader(true);
-    const json = reportJson(id);
-    if (json) {
-      setActions(json.actions);
-      setReportName(json.reportName);
-      setHeading(json.heading);
-      const currentUser = Parse.User.current().id;
+  const getReportData = withSessionValidation(
+    async (id, skipUserRecord = 0, limit = 20, term = searchTerm) => {
+      setIsLoader(true);
+      const json = reportJson(id);
+      if (json) {
+        setActions(json.actions);
+        setReportName(json.reportName);
+        setHeading(json.heading);
+        const currentUser = Parse.User.current().id;
 
-      const headers = {
-        "Content-Type": "application/json",
-        "X-Parse-Application-Id": localStorage.getItem("parseAppId"),
-        sessiontoken: localStorage.getItem("accesstoken")
-      };
-      try {
-        const skipRecord = id === "5Go51Q7T8r" ? 0 : skipUserRecord;
-        const limitRecord = id === "5Go51Q7T8r" ? 200 : limit;
-        const params = { reportId: id, skip: skipRecord, limit: limitRecord };
-        if (term) {
-          params.searchTerm = term;
-        }
-        const url = `${localStorage.getItem("baseUrl")}functions/getReport`;
-        const res = await axios.post(url, params, {
-          headers: headers,
-          signal: abortController.signal // is used to cancel fetch query
-        });
-        if (id === "5Go51Q7T8r") {
-          const listData = res.data?.result.filter((x) => x.Signers.length > 0);
-          let arr = [];
-          for (const obj of listData) {
-            const isSigner = obj.Signers?.some(
-              (item) => item.UserId.objectId === currentUser
+        const headers = {
+          "Content-Type": "application/json",
+          "X-Parse-Application-Id": localStorage.getItem("parseAppId"),
+          sessiontoken: localStorage.getItem("accesstoken")
+        };
+        try {
+          const skipRecord = id === "5Go51Q7T8r" ? 0 : skipUserRecord;
+          const limitRecord = id === "5Go51Q7T8r" ? 200 : limit;
+          const params = { reportId: id, skip: skipRecord, limit: limitRecord };
+          if (term) {
+            params.searchTerm = term;
+          }
+          const url = `${localStorage.getItem("baseUrl")}functions/getReport`;
+          const res = await axios.post(url, params, {
+            headers: headers,
+            signal: abortController.signal // is used to cancel fetch query
+          });
+          if (id === "5Go51Q7T8r") {
+            const listData = res.data?.result.filter(
+              (x) => x.Signers.length > 0
             );
-            if (isSigner) {
-              let isRecord;
-              if (obj?.AuditTrail && obj?.AuditTrail.length > 0) {
-                isRecord = obj?.AuditTrail.some(
-                  (item) =>
-                    item?.UserPtr?.UserId?.objectId === currentUser &&
-                    item.Activity === "Signed"
-                );
-              } else {
-                isRecord = false;
-              }
-              if (isRecord === false) {
-                arr.push(obj);
+            let arr = [];
+            for (const obj of listData) {
+              const isSigner = obj.Signers?.some(
+                (item) => item.UserId.objectId === currentUser
+              );
+              if (isSigner) {
+                let isRecord;
+                if (obj?.AuditTrail && obj?.AuditTrail.length > 0) {
+                  isRecord = obj?.AuditTrail.some(
+                    (item) =>
+                      item?.UserPtr?.UserId?.objectId === currentUser &&
+                      item.Activity === "Signed"
+                  );
+                } else {
+                  isRecord = false;
+                }
+                if (isRecord === false) {
+                  arr.push(obj);
+                }
               }
             }
-          }
-          if (arr.length === docPerPage) {
-            setIsMoreDocs(true);
-          } else {
-            setIsMoreDocs(false);
-          }
-          setList((prevRecord) =>
-            prevRecord.length > 0 ? [...prevRecord, ...arr] : arr
-          );
-        } else {
-          if (res.data.result.length >= docPerPage) {
-            setIsMoreDocs(true);
-          } else {
-            setIsMoreDocs(false);
-          }
-          setIsNextRecord(false);
-          if (!res.data.result.error) {
+            if (arr.length === docPerPage) {
+              setIsMoreDocs(true);
+            } else {
+              setIsMoreDocs(false);
+            }
             setList((prevRecord) =>
-              prevRecord.length > 0
-                ? [...prevRecord, ...res.data.result]
-                : res.data.result
+              prevRecord.length > 0 ? [...prevRecord, ...arr] : arr
             );
+          } else {
+            if (res.data.result.length >= docPerPage) {
+              setIsMoreDocs(true);
+            } else {
+              setIsMoreDocs(false);
+            }
+            setIsNextRecord(false);
+            if (!res.data.result.error) {
+              setList((prevRecord) =>
+                prevRecord.length > 0
+                  ? [...prevRecord, ...res.data.result]
+                  : res.data.result
+              );
+            }
           }
-        }
-        setIsLoader(false);
-      } catch (err) {
-        const isCancel = axios.isCancel(err);
-        if (!isCancel) {
-          console.log("err ", err);
+          setIsLoader(false);
+        } catch (err) {
+          const isCancel = axios.isCancel(err);
+          if (!isCancel) {
+            console.log("err ", err);
+            setIsLoader(false);
+          }
           setIsLoader(false);
         }
+      } else {
         setIsLoader(false);
       }
-    } else {
-      setIsLoader(false);
     }
-  };
+  );
   return (
     <>
       {isLoader ? (
@@ -198,7 +197,7 @@ function DashboardReport(props) {
       ) : (
         <>
           {reportName ? (
-            <ReportTable
+            <DocumentsReport
               ReportName={reportName}
               List={List}
               setList={setList}
@@ -215,9 +214,9 @@ function DashboardReport(props) {
               isSearchResult={isSearchResult}
             />
           ) : (
-            <div className="flex items-center justify-center h-[100px] w-full bg-white rounded">
-              <div className="text-center">
-                <p className="text-xl text-base-content">{t("report-not-found")}</p>
+            <div className="flex items-center justify-center h-[100px] w-full bg-white rounded-box">
+              <div className="text-center text-xl text-base-content">
+                {t("report-not-found")}
               </div>
             </div>
           )}

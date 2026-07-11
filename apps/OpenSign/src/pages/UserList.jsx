@@ -7,10 +7,15 @@ import ModalUi from "../primitives/ModalUi";
 import pad from "../assets/images/pad.svg";
 import Tooltip from "../primitives/Tooltip";
 import AddUser from "../components/AddUser";
-import Title from "../components/Title";
 import {
   useTranslation
 } from "react-i18next";
+import DeleteUserModal from "../primitives/DeleteUserModal";
+import axios from "axios";
+import PasswordResetModal from "../primitives/PasswordResetModal";
+import { usersActions } from "../json/ReportJson";
+import { withSessionValidation } from "../utils";
+
 const heading = ["Sr.No", "Name", "Email", "Phone", "Role", "Team", "Active"];
 const UserList = () => {
   const { t } = useTranslation();
@@ -30,6 +35,11 @@ const UserList = () => {
   const [isActLoader, setIsActLoader] = useState({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [formHeader, setFormHeader] = useState(t("add-user"));
+  const [deleteUserRes, setDeleteUserRes] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [isActModal, setIsActModal] = useState({});
+  const Extand_Class = localStorage.getItem("Extand_Class");
+  const extClass = Extand_Class && JSON.parse(Extand_Class);
   const recordperPage = 10;
   const startIndex = (currentPage - 1) * recordperPage; // user per page
 
@@ -159,7 +169,7 @@ const UserList = () => {
   };
   const handleClose = () => setIsActiveModal({});
 
-  const handleToggleSubmit = async (user) => {
+  const handleToggleSubmit = withSessionValidation(async (user) => {
     const index = userList.findIndex((obj) => obj.objectId === user.objectId);
     if (index !== -1) {
       setIsActiveModal({});
@@ -184,19 +194,93 @@ const UserList = () => {
         setIsActLoader({});
       }
     }
-  };
+  });
   const handleToggleBtn = (user) => {
     setIsActiveModal({ [user.objectId]: true });
   };
 
   // `showAlert` handle show/hide alert
-  const showAlert = (type, msg) => {
+  const showAlert = (type, msg, timer = 1500) => {
     setIsAlert({ type, msg });
-    setTimeout(() => setIsAlert({ type: "success", msg: "" }), 1500);
+    setTimeout(() => setIsAlert({ type: "success", msg: "" }), timer);
   };
+
+  const handleDeleteAccount = withSessionValidation(async (item) => {
+    setDeleting(true);
+    if (item?.UserId?.objectId) {
+      const url = localStorage.getItem("baseUrl")?.replace(/\/app\/?$/, "/");
+      const deleteUrl = `${url}deleteuser/${item.UserId.objectId}`;
+      try {
+        await axios.post(deleteUrl, null, {
+          headers: { sessiontoken: localStorage.getItem("accesstoken") }
+        });
+        setUserList((prev) =>
+          prev.filter((user) => user.objectId !== item.objectId)
+        );
+        showAlert("success", t("user-deleted-successfully"));
+      } catch (err) {
+        const message = err?.response?.data?.message || err?.message;
+        setDeleteUserRes(message);
+        showAlert("danger", message);
+        console.log("Err in deleteuser acc", err);
+      } finally {
+        setDeleting(false);
+      }
+    } else {
+      showAlert("danger", t("something-went-wrong-mssg"));
+      setDeleteUserRes(t("something-went-wrong-mssg"));
+      setDeleting(false);
+    }
+  });
+  const handleCloseModal = () => {
+    setIsActModal({});
+    setDeleteUserRes("");
+    setDeleting(false);
+  };
+
+  const handleActionBtn = withSessionValidation(async (act, item) => {
+      setIsActModal({ [`${act.action}_${item.objectId}`]: true });
+  });
+  const handleBtnVisibility = (act, item) => {
+    if (act.restrictAdmin) {
+      if (item?.UserRole === "contracts_Admin") {
+        return false;
+      } else {
+        return item?.objectId !== extClass?.[0]?.objectId;
+      }
+    } else if (
+      act.restrictBtn === true &&
+      item?.objectId === extClass?.[0]?.objectId
+    ) {
+      return true;
+    } else {
+      return true;
+    }
+  };
+  const handleActiveToggleVisibility = (item) => {
+    if (item?.UserRole === "contracts_Admin") {
+      return false;
+    } else {
+      return item?.objectId !== extClass?.[0]?.objectId;
+    }
+  };
+
+  const submitPassword = withSessionValidation(async (userId, password) => {
+    setIsLoader(true);
+    setIsActModal({});
+    try {
+      const params = { userId, password };
+      await Parse.Cloud.run("resetpassword", params);
+      showAlert("success", t("password-has-been-reset"));
+    } catch (err) {
+      console.log("err while reset password", err);
+      showAlert("danger", t(err.message), 2000);
+    } finally {
+      setIsLoader(false);
+    }
+  });
   return (
     <div className="relative">
-      <Title title={isAdmin ? "Users" : "Page not found"} />
       {isLoader && (
         <div className="absolute w-full h-[300px] md:h-[400px] flex justify-center items-center z-30 rounded-box">
           <Loader />
@@ -241,6 +325,11 @@ const UserList = () => {
                               {t(`report-heading.${item}`)}
                             </th>
                           ))}
+                          {usersActions?.length > 0 && (
+                            <th className="p-2 text-transparent pointer-events-none">
+                              {t("action")}
+                            </th>
+                          )}
                         </tr>
                       </thead>
                       {userList?.length > 0 && (
@@ -267,12 +356,16 @@ const UserList = () => {
                               <td className="px-4 py-2">
                                 {formatRow(item.TeamIds)}
                               </td>
-                              {item.UserRole !== "contracts_Admin" ? (
+                              {handleActiveToggleVisibility(item) ? (
                                 <td className="px-4 py-2 font-semibold">
-                                  <label className="cursor-pointer relative block items-center mb-0">
+                                  <label
+                                    htmlFor={`isdisabled-${item.objectId}`}
+                                    className="cursor-pointer relative block items-center mb-0"
+                                  >
                                     <input
+                                      id={`isdisabled-${item.objectId}`}
                                       type="checkbox"
-                                      className="op-toggle transition-all op-toggle-secondary"
+                                      className="op-toggle checked:[--tglbg:#3368ff] transition-all checked:text-white"
                                       checked={item?.IsDisabled !== true}
                                       onChange={() => handleToggleBtn(item)}
                                     />
@@ -315,6 +408,62 @@ const UserList = () => {
                               ) : (
                                 <td className="px-4 py-2 font-semibold"></td>
                               )}
+
+                              {isAdmin && (
+                                <td className="px-3 py-2">
+                                  <div className="text-base-content min-w-max flex flex-row gap-x-2 gap-y-1 justify-start items-center">
+                                    {usersActions?.length > 0 &&
+                                      usersActions?.map((act, index) => (
+                                        <React.Fragment key={index}>
+                                          {handleBtnVisibility(act, item) && (
+                                            <div
+                                              role="button"
+                                              data-tut={act?.selector}
+                                              onClick={() =>
+                                                handleActionBtn(act, item)
+                                              }
+                                              title={t(
+                                                `btnLabel.${act.hoverLabel}`
+                                              )}
+                                              className={
+                                                act.action !== "option"
+                                                  ? `${act?.btnColor || ""} op-btn op-btn-sm mr-1 `
+                                                  : "text-base-content focus:outline-none text-lg mr-2 relative"
+                                              }
+                                            >
+                                              <i className={act.btnIcon}></i>
+                                              {act.btnLabel && (
+                                                <span className="uppercase font-medium">
+                                                  {t(
+                                                    `btnLabel.${act.btnLabel}`
+                                                  )}
+                                                </span>
+                                              )}
+                                            </div>
+                                          )}
+                                        </React.Fragment>
+                                      ))}
+                                  </div>
+                                </td>
+                              )}
+                              <DeleteUserModal
+                                title={t("delete-account")}
+                                deleting={deleting}
+                                userEmail={item?.Email}
+                                isOpen={isActModal["delete_" + item.objectId]}
+                                onConfirm={() => handleDeleteAccount(item)}
+                                deleteRes={deleteUserRes}
+                                handleClose={handleCloseModal}
+                              />
+                              <PasswordResetModal
+                                isOpen={
+                                  isActModal["resetpassword_" + item.objectId]
+                                }
+                                userId={item?.UserId?.objectId}
+                                onClose={handleCloseModal}
+                                onSubmit={submitPassword}
+                                showAlert={showAlert}
+                              />
                             </tr>
                           ))}
                         </tbody>
@@ -367,7 +516,7 @@ const UserList = () => {
                         />
                       </div>
                       <div className="text-sm font-semibold">
-                        {t("no-data-avaliable")}
+                        {t("no-data-available")}
                       </div>
                     </div>
                   )}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ModalUi from "../../primitives/ModalUi";
 import { radioButtonWidget } from "../../constant/Utils";
 import { useTranslation } from "react-i18next";
@@ -21,6 +21,8 @@ function DropdownWidgetOption(props) {
   const [layout, setLayout] = useState("vertical");
   const statusArr = ["required", "optional"];
   const layoutArr = ["vertical", "horizontal"];
+  const isPrefillExist = props?.roleName === "prefill";
+
 
   const resetState = () => {
     setDropdownOptionList(["Option-1", "Option-2"]);
@@ -87,7 +89,7 @@ function DropdownWidgetOption(props) {
     const deleteOption = true;
     const addOption = false;
     const getUpdatedOptions = dropdownOptionList.filter(
-      (data, index) => index !== ind
+      (_, index) => index !== ind
     );
     setDropdownOptionList(getUpdatedOptions);
     props.handleSaveWidgetsOptions(
@@ -102,16 +104,23 @@ function DropdownWidgetOption(props) {
   };
 
   const handleSaveOption = () => {
-    const defaultData =
-      defaultCheckbox && defaultCheckbox.length > 0
-        ? defaultCheckbox
-        : defaultValue;
+    if (["checkbox", radioButtonWidget, "dropdown"].includes(props.type)) {
+      const allUnique =
+        new Set(dropdownOptionList).size === dropdownOptionList.length;
+      if (!allUnique) {
+        alert("Please remove duplicate option");
+        return;
+      }
+    }
 
     const isDropdownOrRadio =
       props?.type === "dropdown" || props?.type === radioButtonWidget;
+    const isCheckbox = props?.type === "checkbox";
+
+    const defaultData = isCheckbox ? defaultCheckbox : defaultValue;
+
     const readOnlyWithoutValue =
       isReadOnly && !defaultValue && status !== "optional";
-    const isCheckbox = props?.type === "checkbox";
     const WidgetLayout = ["checkbox", radioButtonWidget].includes(props.type)
       ? layout
       : null;
@@ -142,19 +151,21 @@ function DropdownWidgetOption(props) {
       status,
       defaultData,
       isHideLabel,
-      WidgetLayout
+      WidgetLayout,
     );
     resetState();
   };
 
 
-  const handleDefaultCheck = (index) => {
-    const getDefaultCheck = defaultCheckbox.includes(index);
-    if (getDefaultCheck) {
-      return true;
-    } else {
-      return false;
-    }
+  const handleSelectDefaultCheckbox = (e, index) => {
+    const checked = e.target.checked;
+    setDefaultCheckbox((prev) =>
+      checked
+        ? prev.includes(index)
+          ? prev
+          : [...prev, index]
+        : prev.filter((i) => i !== index)
+    );
   };
   return (
     <ModalUi isOpen={props.showDropdown} title={props.title} showClose={false}>
@@ -192,21 +203,8 @@ function DropdownWidgetOption(props) {
                   {props.type === "checkbox" && props.isShowAdvanceFeature && (
                     <input
                       type="checkbox"
-                      checked={handleDefaultCheck(index)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          const getDefaultCheck =
-                            defaultCheckbox?.includes(index);
-                          if (!getDefaultCheck) {
-                            setDefaultCheckbox((prev) => [...prev, index]);
-                          }
-                        } else {
-                          const removeOption = defaultCheckbox.filter(
-                            (data) => data !== index
-                          );
-                          setDefaultCheckbox(removeOption);
-                        }
-                      }}
+                      checked={defaultCheckbox?.includes(index)}
+                      onChange={(e) => handleSelectDefaultCheckbox(e, index)}
                       className="op-checkbox focus:outline-none hover:border-base-content mr-[5px]"
                     />
                   )}
@@ -223,42 +221,46 @@ function DropdownWidgetOption(props) {
                   />
 
                   <i
-                    className="fa-light fa-rectangle-xmark text-[25px] ml-[10px] text-accent cursor-pointer"
+                    className="fa-light fa-trash-can text-[25px] ml-[10px] text-accent cursor-pointer"
                     onClick={() => handleDeleteInput(index)}
                   ></i>
                 </div>
               ))}
-              <i
-                onClick={handleAddInput}
-                className="fa-light fa-square-plus text-[25px] ml-[10px] op-text-primary cursor-pointer"
-              ></i>
+              <div>
+                <i
+                  className="fa-light fa-square-plus text-[25px] ml-[10px] op-text-primary cursor-pointer"
+                  aria-label="Add option"
+                  onClick={handleAddInput}
+                ></i>
+              </div>
             </div>
-            {["dropdown", radioButtonWidget].includes(props.type) && (
-              <>
-                <label className="text-[13px] font-semibold mt-[5px]">
-                  {t("default-value")}
-                </label>
-                <select
-                  onChange={(e) => setDefaultValue(e.target.value)}
-                  className="op-select op-select-bordered op-select-sm focus:outline-none hover:border-base-content w-full text-xs"
-                  name="defaultvalue"
-                  value={defaultValue}
-                  placeholder="select default value"
-                >
-                  <option value="" disabled hidden className="text-[13px]">
-                    {t("select")}...
-                  </option>
-                  {dropdownOptionList.map((data, ind) => {
-                    return (
-                      <option className="text-[13px]" key={ind} value={data}>
-                        {data}
-                      </option>
-                    );
-                  })}
-                </select>
-              </>
-            )}
-            {props.type !== "checkbox" && (
+            {["dropdown", radioButtonWidget].includes(props.type) &&
+              !isPrefillExist && (
+                <>
+                  <label className="text-[13px] font-semibold mt-[5px]">
+                    {t("default-value")}
+                  </label>
+                  <select
+                    value={defaultValue}
+                    onChange={(e) => setDefaultValue(e.target.value)}
+                    className="op-select op-select-bordered op-select-sm focus:outline-none hover:border-base-content w-full text-xs"
+                    name="defaultvalue"
+                  >
+                    <option value="" disabled hidden className="text-[13px]">
+                      {t("select")}...
+                    </option>
+                    {dropdownOptionList.map((data, ind) => {
+                      return (
+                        <option className="text-[13px]" key={ind} value={data}>
+                          {data}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </>
+              )}
+            {((props.type !== "checkbox" && !isPrefillExist) ||
+              isPrefillExist) && (
               <div className="flex flex-row gap-[10px] mt-[0.5rem]">
                 {statusArr.map((data, ind) => (
                   <div
@@ -332,7 +334,7 @@ function DropdownWidgetOption(props) {
               props.type
             ) && (
               <div className="flex flex-row gap-5 my-2 items-center text-center">
-                {props.isShowAdvanceFeature && (
+                {props.isShowAdvanceFeature && !isPrefillExist && (
                   <div className="flex items-center">
                     <input
                       id="isreadonly"
@@ -406,6 +408,7 @@ function DropdownWidgetOption(props) {
             } w-full h-[1px] bg-[#9f9f9f]`}
           ></div>
 
+
           <button
             disabled={dropdownOptionList.length === 0 && true}
             type="submit"
@@ -416,7 +419,7 @@ function DropdownWidgetOption(props) {
           {props.currWidgetsDetails?.options?.values?.length > 0 && (
             <button
               type="submit"
-              className="op-btn op-btn-ghost ml-1"
+              className="op-btn op-btn-ghost text-base-content ml-1"
               onClick={() => {
                 props.handleClose && props.handleClose();
                 resetState();

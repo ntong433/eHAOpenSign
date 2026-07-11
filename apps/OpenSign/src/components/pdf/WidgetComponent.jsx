@@ -1,116 +1,65 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import ModalUi from "../../primitives/ModalUi";
 import RecipientList from "./RecipientList";
-import { useDrag } from "react-dnd";
 import WidgetList from "./WidgetList";
 import {
-  color,
   isMobile,
   radioButtonWidget,
   textInputWidget,
   cellsWidget,
   textWidget,
-  widgets
+  widgets,
+  drawWidget
 } from "../../constant/Utils";
 import { useTranslation } from "react-i18next";
+import { useWidgetDrag } from "../../hook/useWidgetDrag";
+
 function WidgetComponent(props) {
   const { t } = useTranslation();
   const signRef = useRef(null);
   const userInformation = localStorage.getItem("UserInformation");
   const [isSignersModal, setIsSignersModal] = useState(false);
-  const [, signature] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 1, text: "signature" }
-  });
-  const [, stamp] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 2, text: "stamp" }
-  });
-  const [, dropdown] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 5, text: "dropdown" }
-  });
-  const [, checkbox] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 6, text: "checkbox" }
-  });
-  const [, textInput] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 7, text: textInputWidget }
-  });
-  const [, cells] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 17, text: cellsWidget }
-  });
-  const [, initials] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 8, text: "initials" }
-  });
-  const [, name] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 9, text: "name" }
-  });
-  const [, company] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 10, text: "company" }
-  });
-  const [, jobTitle] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 11, text: "job title" }
-  });
-  const [, date] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 12, text: "date" }
-  });
-  const [, image] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 13, text: "image" }
-  });
-  const [, email] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 14, text: "email" }
-  });
-  const [, radioButton] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 15, text: radioButtonWidget }
-  });
-  const [, text] = useDrag({
-    type: "BOX",
-    item: { type: "BOX", id: 16, text: textWidget }
-  });
-  const [widget, setWidget] = useState([]);
+  // Define all draggable widget configurations
+  const draggableItems = [
+    { id: 1, text: "signature" },
+    { id: 2, text: "stamp" },
+    { id: 3, text: "initials" },
+    { id: 4, text: textInputWidget },
+    { id: 6, text: "name" },
+    { id: 7, text: "job title" },
+    { id: 8, text: "company" },
+    { id: 9, text: "email" },
+    { id: 10, text: "date" },
+    { id: 11, text: textWidget },
+    { id: 12, text: cellsWidget },
+    { id: 13, text: "checkbox" },
+    { id: 14, text: "dropdown" },
+    { id: 15, text: radioButtonWidget },
+    { id: 16, text: "image" },
+    { id: 17, text: drawWidget },
+  ];
+
+  // Create all drag refs in one go
+  const widgetRefs = draggableItems.map((item) =>
+    useWidgetDrag({ type: "BOX", ...item })
+  );
+
+  // Map your widgets with the generated dragRefs
+  const [widgetList, setWidgetList] = useState([]);
   const handleModal = () => {
     setIsSignersModal(!isSignersModal);
   };
-
   useEffect(() => {
-    const widgetRef = [
-      signature,
-      stamp,
-      initials,
-      name,
-      jobTitle,
-      company,
-      date,
-      text,
-      textInput,
-      cells,
-      checkbox,
-      dropdown,
-      radioButton,
-      image,
-      email
-    ];
-    const getWidgetArray = widgets;
-    const newUpdateSigner = getWidgetArray.map((obj, ind) => {
-      return { ...obj, ref: widgetRef[ind] };
-    });
-
-    setWidget(newUpdateSigner);
+    const updated = widgets.map((obj, index) => ({
+      ...obj,
+      ref: widgetRefs[index]?.dragRef || null
+    }));
+    setWidgetList(updated);
     // eslint-disable-next-line
   }, []);
 
-  const modifiedWidgets = widget.filter(
+  // allow only (signature, stamp, initials, text, name, job title, company, email, cells) widget when isAllowModification true and user have session token
+  const modifiedWidgets = widgetList.filter(
     (data) =>
       ![
         "dropdown",
@@ -118,10 +67,12 @@ function WidgetComponent(props) {
         textInputWidget,
         "date",
         "image",
-        "checkbox"
+        "checkbox",
+        drawWidget
       ].includes(data.type)
   );
-  const unlogedInUserWidgets = widget.filter(
+  // allow only (signature, stamp, initials, text, cells) widget when isAllowModification true and user does not have session token
+  const unlogedInUserWidgets = widgetList.filter(
     (data) =>
       ![
         "dropdown",
@@ -133,28 +84,55 @@ function WidgetComponent(props) {
         "name",
         "email",
         "job title",
-        "company"
+        "company",
+        drawWidget
       ].includes(data.type)
   );
-  const filterWidgets = widget.filter(
+  const selfSignWidgets = widgetList.filter(
     (data) =>
-      !["dropdown", radioButtonWidget, textInputWidget].includes(
-        data.type
-      )
+      ![
+        "dropdown",
+        radioButtonWidget,
+        textInputWidget,
+        drawWidget,
+      ].includes(data.type)
   );
-  const textWidgetData = widget.filter((data) => data.type !== textWidget);
-  const updateWidgets = props.isSignYourself
-    ? filterWidgets
-    : props.isTemplateFlow
-      ? textWidgetData
-      : props.isAlllowModify
-        ? userInformation
-          ? modifiedWidgets
-          : unlogedInUserWidgets
-        : widget;
-
+  //if user select prefill role then allow only date,image,text,checkbox,radio,dropdownAdd commentMore actions
+  //dropdown widget should only be show in template flow
+  const prefillAllowWidgets = widgetList.filter((data) =>
+    (props.isPrefillDropdown ? ["dropdown"] : [])
+      .concat([
+        radioButtonWidget,
+        textWidget,
+        "date",
+        "image",
+        "checkbox",
+        drawWidget
+      ])
+      .includes(data.type)
+  );
+  //function to show widget on the base of conditionAdd commentMore actions
+  const handleWidgetType = () => {
+    if (props.isSignYourself) {
+      return selfSignWidgets;
+    } else if (props?.roleName === "prefill") {
+      return prefillAllowWidgets;
+    } else if (props.isAlllowModify) {
+      if (userInformation) {
+        return modifiedWidgets;
+      } else {
+        return unlogedInUserWidgets;
+      }
+    } else if (props?.roleName !== "prefill") {
+      return widgetList.filter(
+        (data) => ![textWidget, drawWidget].includes(data.type)
+      );
+    }
+  };
   const handleSelectRecipient = () => {
-    if (
+    if (props?.roleName === "prefill") {
+      return "Prefill by owner";
+    } else if (
       props.signersdata[props.isSelectListId]?.Email ||
       props.signersdata[props.isSelectListId]?.Role
     ) {
@@ -166,7 +144,12 @@ function WidgetComponent(props) {
       return name;
     }
   };
-
+  const handleBlockColor = () => {
+    const widgetBoxColor = props?.signerPos?.find(
+      (x) => x?.Id === props?.uniqueId
+    )?.blockColor;
+    return widgetBoxColor;
+  };
   return (
     <>
       {isMobile ? (
@@ -180,9 +163,10 @@ function WidgetComponent(props) {
                     className="w-full op-select op-select-bordered  pointer-events-none"
                     value={handleSelectRecipient()}
                     style={{
-                      backgroundColor: props.blockColor
-                        ? props.blockColor
-                        : color[0]
+                      backgroundColor:
+                        props.roleName === "prefill"
+                          ? "#edf6fc"
+                          : handleBlockColor() || "#edf6fc"
                     }}
                   >
                     <option value={handleSelectRecipient()}>
@@ -221,7 +205,7 @@ function WidgetComponent(props) {
             >
               <div className="flex whitespace-nowrap overflow-x-scroll pt-[10px] pb-[5px] pr-[5px]">
                 <WidgetList
-                  updateWidgets={updateWidgets}
+                  updateWidgets={handleWidgetType}
                   handleDivClick={props.handleDivClick}
                   handleMouseLeave={props.handleMouseLeave}
                   signRef={signRef}
@@ -240,12 +224,23 @@ function WidgetComponent(props) {
           } hidden md:block h-full bg-base-100`}
         >
           <div className="mx-2 pr-2 pt-2 pb-1 text-[15px] text-base-content font-semibold border-b-[1px] border-base-300">
-            <span>{t("fields")}</span>
+            <span>
+              {t("widgets")}
+              {props?.isSignYourself && (
+                <sup onClick={() => props.setIsTour && props.setIsTour(true)}>
+                  <i className="ml-1 cursor-pointer fa-light fa-question rounded-full border-[1px] border-base-content text-[11px] py-[1px] px-[3px]"></i>
+                </sup>
+              )}
+            </span>
           </div>
-
-          <div className="p-[15px] flex flex-col pt-4" data-tut="addWidgets">
+          <div
+            className="p-[12px] grid lg:grid-cols-2 gap-x-2 lg:gap-y-1.5 pt-3"
+            data-tut="addWidgets"
+            role="list"
+            aria-label="Add widgets"
+          >
             <WidgetList
-              updateWidgets={updateWidgets}
+              updateWidgets={handleWidgetType}
               handleDivClick={props.handleDivClick}
               handleMouseLeave={props.handleMouseLeave}
               signRef={signRef}
@@ -260,7 +255,7 @@ function WidgetComponent(props) {
           isOpen={isSignersModal}
           handleClose={handleModal}
         >
-          {props.signersdata.length > 0 ? (
+          {props.signersdata.length > 0 || props.prefillSigner.length > 0 ? (
             <div className="max-h-[600px] overflow-auto pb-1">
               <RecipientList
                 signerPos={props.signerPos}
@@ -278,6 +273,7 @@ function WidgetComponent(props) {
                 setBlockColor={props.setBlockColor}
                 uniqueId={props.uniqueId}
                 setSignerPos={props.setSignerPos}
+                prefillSigner={props.prefillSigner}
               />
             </div>
           ) : (

@@ -55,6 +55,15 @@ import recreateDocument from './parsefunction/recreateDocument.js';
 import loginUser from './parsefunction/loginUser.js';
 import addUser from './parsefunction/addUser.js';
 import filterDocs from './parsefunction/filterDocs.js';
+import sendDeleteUserMail from './parsefunction/sendDeleteUserMail.js';
+import resetPassword from './parsefunction/resetPassword.js';
+import saveSignature from './parsefunction/saveSignature.js';
+import manageSign from './parsefunction/manageSign.js';
+import getSignature from './parsefunction/getSignature.js';
+import updateEmailTemplates from './parsefunction/updateEmailTemplates.js';
+import triggerEvent from './parsefunction/triggerEvent.js';
+import setWidgetPreferences from './parsefunction/setWidgetPreferences.js';
+import createDocumentFromApp from './parsefunction/createDocumentFromApp.js';
 
 // This afterSave function triggers after an object is added or updated in the specified class, allowing for post-processing logic.
 Parse.Cloud.afterSave('contracts_Document', DocumentAftersave);
@@ -120,3 +129,12 @@ Parse.Cloud.define('recreatedoc', recreateDocument);
 Parse.Cloud.define('loginuser', loginUser);
 Parse.Cloud.define('adduser', addUser);
 Parse.Cloud.define('filterdocs', filterDocs);
+Parse.Cloud.define('senddeleterequest', sendDeleteUserMail);
+Parse.Cloud.define('resetpassword', resetPassword);
+Parse.Cloud.define('savesignature', saveSignature);
+Parse.Cloud.define('managesign', manageSign);
+Parse.Cloud.define('getdefaultsignature', getSignature);
+Parse.Cloud.define('updateemailtemplates', updateEmailTemplates);
+Parse.Cloud.define('triggerevent', triggerEvent);
+Parse.Cloud.define('setwidgetpreferences', setWidgetPreferences);
+Parse.Cloud.define('createdocumentfromapp', createDocumentFromApp);

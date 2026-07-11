@@ -28,6 +28,7 @@ const EditTemplate = ({
   onSuccess,
   setPdfArrayBuffer,
   setPdfBase64Url,
+  isAddYourSelfCheckbox,
 }) => {
   const appName =
     "OpenSign™";
@@ -38,6 +39,8 @@ const EditTemplate = ({
     Note: template?.Note || "",
     Description: template?.Description || "",
     SendinOrder: template?.SendinOrder ? `${template?.SendinOrder}` : "false",
+    SendInOrderStrict:
+      template?.SendInOrderStrict === true ? "true" : "false",
     AutomaticReminders: template?.AutomaticReminders || false,
     RemindOnceInEvery: template?.RemindOnceInEvery || 5,
     IsEnableOTP: template?.IsEnableOTP ? `${template?.IsEnableOTP}` : "false",
@@ -49,10 +52,15 @@ const EditTemplate = ({
         ? template?.NotifyOnSignatures
         : false,
     Bcc: template?.Bcc,
+    Cc: template?.Cc,
     RedirectUrl: template?.RedirectUrl || "",
     AllowModifications: template?.AllowModifications || false,
-    TimeToCompleteDays: template?.TimeToCompleteDays || 15
+    TimeToCompleteDays: template?.TimeToCompleteDays || 15,
   });
+  const pensList = ["blue", "red", "black"];
+  const [selectedColors, setSelectedColors] = useState(
+    template?.PenColors || pensList
+  );
   const [isUpdate, setIsUpdate] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [uploadPdf, setUploadPdf] = useState({
@@ -71,7 +79,7 @@ const EditTemplate = ({
       handleReplaceFileValdition(file);
       // You can handle the file here
     } else {
-      alert("Only pdf files are allowed.");
+      alert(t("only-pdf-allowed"));
       if (inputFileRef.current) inputFileRef.current.value = "";
     }
   };
@@ -181,9 +189,12 @@ const EditTemplate = ({
         localStorage.getItem("TenantId") ||
         template?.ExtUserPtr?.TenantId?.objectId;
       const buffer = atob(uploadPdf.base64);
-      SaveFileSize(buffer.length, pdfUrl, tenantId);
+      const userId = template?.ExtUserPtr?.UserId?.objectId;
+      SaveFileSize(buffer.length, pdfUrl, tenantId, userId);
     }
     const isChecked = formData.SendinOrder === "true" ? true : false;
+    const isStrictOrder =
+      isChecked && formData.SendInOrderStrict === "true";
     const isTourEnabled = formData?.IsTourEnabled === "false" ? false : true;
     const AutoReminder = formData?.AutomaticReminders || false;
     const IsEnableOTP = formData.IsEnableOTP === "true" ? true : false;
@@ -206,9 +217,11 @@ const EditTemplate = ({
       ...formData,
       ...(pdfUrl ? { URL: pdfUrl } : {}),
       SendinOrder: isChecked,
+      SendInOrderStrict: isStrictOrder,
       IsEnableOTP: IsEnableOTP,
       IsTourEnabled: isTourEnabled,
       AllowModifications: allowModify,
+      PenColors: selectedColors,
       ...reminderDate
     };
     onSuccess(data);
@@ -231,6 +244,18 @@ const EditTemplate = ({
     }
   };
 
+  const handleCc = (data) => {
+    if (data && data.length > 0) {
+      const trimEmail = data.map((item) => ({
+        objectId: item?.value,
+        Name: item?.label,
+        Email: item?.email
+      }));
+      setIsUpdate(true);
+      setFormData((prev) => ({ ...prev, Cc: trimEmail }));
+    }
+  };
+
   const handleEditTemplateClose = () => {
     if (isUpdate) {
       setShowConfirm(true);
@@ -241,6 +266,28 @@ const EditTemplate = ({
   const discardChanges = () => {
     setShowConfirm(false);
     handleClose();
+  };
+
+  const handleColorsChange = (color) => {
+    setSelectedColors((prev) => {
+      // If user tries to uncheck the last remaining color → block it
+      if (prev.length === 1 && prev.includes(color)) {
+        return prev;
+      }
+
+      // Normal toggle behavior
+      return prev.includes(color)
+        ? prev.filter((c) => c !== color) // remove
+        : [...prev, color]; // add
+    });
+  };
+
+  const reminderCustomWarning = (e) => {
+    if (!formData.RemindOnceInEvery || formData.RemindOnceInEvery === 0) {
+      return e.target.setCustomValidity(t("input-required"));
+    } else {
+      return e.target.setCustomValidity(t("reminder-error"));
+    }
   };
   return (
     <ModalUi
@@ -382,6 +429,28 @@ const EditTemplate = ({
                   <div className="text-[12px]">{t("no")}</div>
                 </div>
               </div>
+              {formData.SendinOrder === "true" && (
+                <div className="flex items-center gap-[8px] ml-[8px] mt-[4px] mb-[5px]">
+                  <input
+                    type="checkbox"
+                    className="op-checkbox op-checkbox-xs"
+                    name="SendInOrderStrict"
+                    checked={formData.SendInOrderStrict === "true"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        SendInOrderStrict: e.target.checked ? "true" : "false"
+                      })
+                    }
+                  />
+                  <span
+                    className="text-[12px]"
+                    title={t("strict-order-help")}
+                  >
+                    {t("strict-order")}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="text-xs mt-3">
               <label className="block">
@@ -482,18 +551,65 @@ const EditTemplate = ({
                 </div>
               </div>
             </div>
+            <div className="text-xs mt-3 mb-4">
+              <label htmlFor="penColors">
+                {t("pen-colors")}
+                <a data-tooltip-id="pen-colors-tooltip" className="ml-1">
+                  <sup>
+                    <i className="fa-light fa-question rounded-full border-[#33bbff] text-[#33bbff] text-[13px] border-[1px] py-[1.5px] px-[4px]"></i>
+                  </sup>
+                </a>
+                <Tooltip id="pen-colors-tooltip" className="z-[999]">
+                  <div className="max-w-[200px] md:max-w-[450px]">
+                    <p className="font-bold">{t("pen-colors")}</p>
+                    <div>{t("pen-colors-help")}</div>
+                  </div>
+                </Tooltip>
+              </label>
+              <div className="ml-[7px] flex flex-col md:flex-row gap-[10px] mb-[0.7rem]">
+                {pensList.map((color) => (
+                  <div
+                    key={color}
+                    className="flex flex-row gap-[5px] items-center"
+                  >
+                    <input
+                      className="mr-[2px] op-checkbox op-checkbox-xs"
+                      type="checkbox"
+                      name="penColors"
+                      checked={selectedColors.includes(color)}
+                      onChange={() => handleColorsChange(color)}
+                    />
+                    <div className="hover:underline underline-offset-2 cursor-default capitalize">
+                      {color}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="text-xs mt-3">
               <SignersInput
                 label={t("Bcc")}
                 initialData={template?.Bcc}
                 onChange={handleBcc}
-                helptextZindex={50}
+                zindex={50}
                 helpText={t("bcc-help")}
                 isCaptureAllData
+                isAddYourSelfCheckbox={isAddYourSelfCheckbox}
+              />
+            </div>
+            <div className="text-xs mt-3">
+              <SignersInput
+                label={t("Cc")}
+                initialData={template?.Cc}
+                onChange={handleCc}
+                zindex={50}
+                helpText={t("cc-help")}
+                isCaptureAllData
+                isAddYourSelfCheckbox={isAddYourSelfCheckbox}
               />
             </div>
             <div className="text-xs mt-2">
-              <label className="block">Redirect Url</label>
+              <label className="block">{t("redirect-url")}</label>
               <input
                 name="RedirectUrl"
                 className="op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content w-full text-xs"
@@ -520,6 +636,7 @@ const EditTemplate = ({
                   e.target.setCustomValidity(t("input-required"))
                 }
                 onInput={(e) => e.target.setCustomValidity("")}
+                min={1}
                 required
               />
             </div>

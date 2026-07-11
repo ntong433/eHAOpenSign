@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   handleToPrint,
 } from "../../constant/Utils";
@@ -31,7 +31,6 @@ function EmailComponent({
     setIsLoading(true);
     const params = { docId: pdfDetails?.[0]?.objectId, recipients: emailList };
     const sendmail = await Parse.Cloud.run("forwarddoc", params);
-    console.log("sendmail ", sendmail);
     if (sendmail?.status === "success") {
       setSuccessEmail(true);
       setIsEmail(false);
@@ -189,7 +188,7 @@ function EmailComponent({
                   className="p-[10px] pb-[20px] text-base-content rounded-md w-full text-[15px] outline-none bg-transparent border-[1px] op-border-primary"
                   onChange={handleEmailValue}
                   onKeyDown={handleEnterPress}
-                  placeholder={t("enter-email-plaholder")}
+                  placeholder={t("enter-email-placeholder")}
                   onBlur={() => emailValue && handleEnterPress("add")}
                   onInvalid={(e) =>
                     e.target.setCustomValidity(t("input-required"))

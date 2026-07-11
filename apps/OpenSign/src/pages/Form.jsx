@@ -5,11 +5,9 @@ import Parse from "parse";
 import Alert from "../primitives/Alert";
 import SelectFolder from "../components/shared/fields/SelectFolder";
 import SignersInput from "../components/shared/fields/SignersInput";
-import Title from "../components/Title";
 import PageNotFound from "./PageNotFound";
 import { SaveFileSize } from "../constant/saveFileSize";
 import {
-  flattenPdf,
   generatePdfName,
   generateTitleFromFilename,
   getSecureUrl,
@@ -31,6 +29,13 @@ import ModalUi from "../primitives/ModalUi";
 import { Tooltip } from "react-tooltip";
 import Loader from "../primitives/Loader";
 import { useTranslation } from "react-i18next";
+import { useDispatch } from "react-redux";
+import { sessionStatus } from "../redux/reducers/userReducer";
+import { withSessionValidation } from "../utils";
+import {
+  clearAcroFields,
+  isPdfPasswordProtected
+} from "../utils/acroFieldExtractor";
 
 // `Form` render all type of Form on this basis of their provided in path
 function Form() {
@@ -51,6 +56,7 @@ const Forms = (props) => {
   const abortController = new AbortController();
   const inputFileRef = useRef(null);
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const [signers, setSigners] = useState([]);
   const [folder, setFolder] = useState({ ObjectId: "", Name: "" });
   const [formData, setFormData] = useState({
@@ -59,6 +65,7 @@ const Forms = (props) => {
     Note: "",
     TimeToCompleteDays: 15,
     SendinOrder: "false",
+    SendInOrderStrict: "false",
     password: "",
     file: "",
     remindOnceInEvery: 5,
@@ -67,6 +74,7 @@ const Forms = (props) => {
     IsTourEnabled: "false",
     NotifyOnSignatures: "",
     Bcc: [],
+    Cc: [],
     RedirectUrl: "",
     AllowModifications: false
   });
@@ -75,6 +83,7 @@ const Forms = (props) => {
   const [fileload, setfileload] = useState(false);
   const [percentage, setpercentage] = useState(0);
   const [isReset, setIsReset] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   const [isAlert, setIsAlert] = useState({ type: "success", message: "" });
   const [isSubmit, setIsSubmit] = useState(false);
   const [isPassword, setIsPassword] = useState(false);
@@ -82,6 +91,9 @@ const Forms = (props) => {
   const [isCorrectPass, setIsCorrectPass] = useState(true);
   const [isAdvanceOpt, setIsAdvanceOpt] = useState(false);
   const [bcc, setBcc] = useState([]);
+  const [cc, setCc] = useState([]);
+  const pensList = ["blue", "red", "black"];
+  const [selectedColors, setSelectedColors] = useState(pensList);
 
   const handleStrInput = (e) => {
     setIsCorrectPass(true);
@@ -99,6 +111,8 @@ const Forms = (props) => {
     extUserData?.IsTourEnabled === false
       ? "false"
       : "true";
+  const fileSize =
+    maxFileSize;
   useEffect(() => {
     handleReset();
     return () => abortController.abort();
@@ -110,12 +124,16 @@ const Forms = (props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const initializeValues = async () => {
-      setFormData((obj) => ({
-        ...obj,
-        NotifyOnSignatures: true,
-        SendinOrder: sendinorder,
-        IsTourEnabled: istourenabled
-      }));
+    try {
+        setFormData((obj) => ({
+          ...obj,
+          NotifyOnSignatures: true,
+          SendinOrder: sendinorder,
+          IsTourEnabled: istourenabled,
+        }));
+    } finally {
+      setIsInitializing(false);
+    }
   };
 
   // `removeFile` is used to reset progress, percentage and remove file if exists
@@ -126,7 +144,7 @@ const Forms = (props) => {
       e.target.value = "";
     }
   };
-  const handleFileInput = async (e) => {
+  const handleFileInput = withSessionValidation(async (e) => {
     setpercentage(0);
     try {
       const files = Array.from(e.target.files);
@@ -137,11 +155,10 @@ const Forms = (props) => {
         return;
       }
       // setFormData((prev) => ({ ...prev, file: files[0] }));
-      const totalMb = Math.round(
-        files.reduce((sum, f) => sum + f.size, 0) / Math.pow(1024, 2)
-      );
-      if (totalMb > maxFileSize) {
-        alert(`${t("file-alert-1")} ${maxFileSize} MB`);
+      const totalBytes = Math.round(files.reduce((sum, f) => sum + f.size, 0)); // in bytes
+      const fileSizeBytes = fileSize * 1024 * 1024;
+      if (totalBytes > fileSizeBytes) {
+        alert(`${t("file-alert-1")} ${fileSize} MB`);
         setFileUpload("");
         setSelectedFiles([]);
         removeFile(e);
@@ -154,8 +171,9 @@ const Forms = (props) => {
         if (file.type === "application/pdf") {
           try {
             const buffer = await getFileAsArrayBuffer(file);
-            const flat = await flattenPdf(buffer);
-            pdfBuffers.push(flat);
+            await isPdfPasswordProtected(buffer);
+            const newBuffer = await clearAcroFields(buffer); // best effort cleanup to prevent stale data
+            pdfBuffers.push(newBuffer);
           } catch (err) {
             if (err?.message?.includes("is encrypted")) {
               try {
@@ -164,13 +182,11 @@ const Forms = (props) => {
                 setIsDecrypting(false);
                 setfileload(true);
                 const res = await getFileAsArrayBuffer(pdfFile);
-                const flatPdf = await flattenPdf(res);
-                // Upload the file to Parse Server
-                pdfBuffers.push(flatPdf);
+                const newBuffer = await clearAcroFields(res); // best effort cleanup to prevent stale data
+                pdfBuffers.push(newBuffer);
               } catch (err) {
                 removeFile(e);
                 if (err?.response?.status === 401) {
-                  // setIsPassword(true);
                   const password = prompt(
                     `PDF "${file.name}" is password-protected. Enter password:`
                   );
@@ -181,9 +197,8 @@ const Forms = (props) => {
                       setIsDecrypting(false);
                       setfileload(true);
                       const res = await getFileAsArrayBuffer(pdfFile);
-                      const flatPdf = await flattenPdf(res);
-                      // Upload the file to Parse Server
-                      pdfBuffers.push(flatPdf);
+                      const newBuffer = await clearAcroFields(res); // best effort cleanup to prevent stale data
+                      pdfBuffers.push(newBuffer);
                     } catch (err) {
                       console.error(
                         "Incorrect password or decryption failed",
@@ -195,27 +210,33 @@ const Forms = (props) => {
                       setIsDecrypting(false);
                       setfileload(false);
                       removeFile(e);
-                      alert(`Incorrect password for file: ${file.name}`);
+                      alert(
+                        t("incorrect-password-for-file", { file: file.name })
+                      );
+                      return;
                     }
                   } else {
-                    console.error("password not provided");
+                    console.error("Password not provided");
                     setSelectedFiles(
                       filesNameArr.filter((f) => f !== file.name)
                     );
                     setIsDecrypting(false);
                     setfileload(false);
                     removeFile(e);
+                    return;
                   }
                 } else {
-                  console.log("Error uploading file: ", err?.response);
+                  console.error("File upload error: ", err?.response);
                   setIsDecrypting(false);
                   e.target.value = "";
                   removeFile(e);
+                  return;
                 }
               }
             } else {
-              console.log("err ", err);
+              console.error("File upload error: ", err);
               removeFile(e);
+              return;
             }
           }
         } else if (file.type.includes("image/")) {
@@ -272,11 +293,14 @@ const Forms = (props) => {
           } catch (err) {
             setfileload(false);
             removeFile(e);
-            console.log("err in docx to pdf ", err);
-            const error = isOpenSignDomain
-              ? `${t("docx-error")} ${t("docx-error-contact")}`
-              : t("docx-error");
-            alert(error);
+            console.error("Docx to PDF conversion error: ", err);
+            const error =
+                  t("docx-error");
+            if (err?.code === 209) {
+              dispatch(sessionStatus(false));
+            } else {
+              alert(error);
+            }
             return;
           }
         }
@@ -306,8 +330,8 @@ const Forms = (props) => {
           "application/pdf"
         );
         const response = await parseFile.save({
-          progress: (progressValue, loaded, total, { type }) => {
-            if (type === "upload" && progressValue !== null) {
+          progress: (progressValue, loaded, total) => {
+            if (progressValue !== null) {
               const percentCompleted = Math.round((loaded * 100) / total);
               setpercentage(percentCompleted);
             }
@@ -321,7 +345,8 @@ const Forms = (props) => {
         }
       if (uploadedUrl) {
         const tenantId = localStorage.getItem("TenantId");
-        SaveFileSize(pdfBytes.byteLength, uploadedUrl, tenantId);
+        const userId = extUserData?.UserId?.objectId;
+        SaveFileSize(pdfBytes.byteLength, uploadedUrl, tenantId, userId);
         setFileUpload(uploadedUrl);
         setfileload(false);
         const title = generateTitleFromFilename(filesNameArr?.[0]);
@@ -333,10 +358,16 @@ const Forms = (props) => {
         setSelectedFiles([]);
       }
     } catch (error) {
-      alert(error.message);
+      console.error("Document save form error: ", error);
+      if (error?.code === 209) {
+        dispatch(sessionStatus(false));
+      } else {
+        alert(error.message);
+      }
       setSelectedFiles([]);
+      removeFile(e);
     }
-  };
+  });
   // `isValidURL` is used to check valid webhook url
   function isValidURL(value) {
     try {
@@ -346,7 +377,7 @@ const Forms = (props) => {
       return false;
     }
   }
-  const handleSubmit = async (e) => {
+  const handleSubmit = withSessionValidation(async (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (fileupload) {
@@ -374,13 +405,20 @@ const Forms = (props) => {
         object.set("Description", formData?.Description);
         object.set("Note", formData?.Note);
         if (props.title === "Request Signatures") {
-          if (
-            extUserData?.TenantId?.RequestBody &&
-            extUserData?.TenantId?.RequestSubject
-          ) {
-            object.set("RequestBody", extUserData?.TenantId?.RequestBody);
-            object.set("RequestSubject", extUserData?.TenantId?.RequestSubject);
-          }
+            if (
+              extUserData?.TenantId?.RequestBody &&
+              extUserData?.TenantId?.RequestSubject
+            ) {
+              object.set("RequestBody", extUserData?.TenantId?.RequestBody);
+              object.set(
+                "RequestSubject",
+                extUserData?.TenantId?.RequestSubject
+              );
+              object.set(
+                "EmailEditorType",
+                extUserData?.TenantId?.EmailEditorType
+              );
+            }
         }
         if (props.title !== "Sign Yourself") {
           const isChecked = formData.SendinOrder === "false" ? false : true;
@@ -395,10 +433,17 @@ const Forms = (props) => {
             return;
           }
           object.set("SendinOrder", isChecked);
+          // Strict-order is only meaningful when SendinOrder is true.
+          object.set(
+            "SendInOrderStrict",
+            isChecked && formData.SendInOrderStrict === "true"
+          );
           object.set("AutomaticReminders", AutomaticReminders);
           object.set("RemindOnceInEvery", remindOnceInEvery);
           object.set("IsTourEnabled", isTourEnabled);
           object.set("TimeToCompleteDays", TimeToCompleteDays);
+          object.set("PenColors", selectedColors);
+
             object.set("AllowModifications", false);
             object.set("IsEnableOTP", false);
             if (formData.NotifyOnSignatures !== undefined) {
@@ -428,16 +473,37 @@ const Forms = (props) => {
           }));
           object.set("Bcc", Bcc);
         }
+        if (cc && cc.length > 0) {
+          const Cc = cc.map((x) => ({
+            __type: "Pointer",
+            className: "contracts_Contactbook",
+            objectId: x.objectId
+          }));
+          object.set("Cc", Cc);
+        }
+
         const ExtCls = JSON.parse(localStorage.getItem("Extand_Class"));
         object.set("ExtUserPtr", {
           __type: "Pointer",
           className: "contracts_Users",
           objectId: ExtCls[0].objectId
         });
+        if (extUserData?.UseNameAsSender) {
+          const senderName = extUserData?.Name || "";
+          const senderMail = extUserData?.Email || "";
+          if (senderName) {
+            object.set("SenderName", senderName);
+          }
+          if (senderMail) {
+            object.set("SenderMail", senderMail);
+          }
+        }
         const res = await object.save();
         if (res) {
           setSigners([]);
           setBcc([]);
+          setCc([]);
+          setSelectedColors(pensList);
           setFolder({ ObjectId: "", Name: "" });
           const notifySign =
                 extUserData?.NotifyOnSignatures !== undefined
@@ -460,7 +526,7 @@ const Forms = (props) => {
             IsEnableOTP: "false",
             IsTourEnabled: istourenabled,
             RedirectUrl: "",
-            AllowModifications: false
+            AllowModifications: false,
           });
           setFileUpload("");
           setSelectedFiles([]);
@@ -468,8 +534,10 @@ const Forms = (props) => {
           navigate(`/${props?.redirectRoute}/${res.id}`);
         }
       } catch (err) {
-        console.log("err ", err);
-        if (err.message === "only 15 reminder allowed") {
+        console.error("Document save form error: ", err);
+        if (err?.code === 209) {
+          dispatch(sessionStatus(false));
+        } else if (err.message === "only 15 reminder allowed") {
           setIsAlert({
             type: "danger",
             message: t("only-15-reminder-allowed")
@@ -487,7 +555,7 @@ const Forms = (props) => {
     } else {
       alert(t("file-alert-3"));
     }
-  };
+  });
 
   const handleFolder = (data) => {
     setFolder(data);
@@ -513,11 +581,23 @@ const Forms = (props) => {
       setBcc(trimEmail);
     }
   };
+  const handleCc = (data) => {
+    if (data && data.length > 0) {
+      const trimEmail = data.map((item) => ({
+        objectId: item?.value,
+        Name: item?.label,
+        Email: item?.email
+      }));
+      setCc(trimEmail);
+    }
+  };
 
   const handleReset = () => {
     setIsReset(true);
     setSigners([]);
     setBcc([]);
+    setCc([]);
+    setSelectedColors(pensList);
     setFolder({ ObjectId: "", Name: "" });
     const notifySign =
           extUserData?.NotifyOnSignatures !== undefined
@@ -540,7 +620,7 @@ const Forms = (props) => {
       IsTourEnabled: istourenabled,
       NotifyOnSignatures: notifySign,
       RedirectUrl: "",
-      AllowModifications: false
+      AllowModifications: false,
     };
     setFormData(obj);
     removeFile();
@@ -555,17 +635,24 @@ const Forms = (props) => {
     e.preventDefault();
     setIsPassword(false);
     setfileload(true);
+    const tenantId = localStorage.getItem("TenantId");
+    const userId = extUserData?.UserId?.objectId;
     try {
       const size = formData?.file?.size;
       const name = generatePdfName(16);
       const pdfFile = await decryptPdf(formData?.file, formData?.password);
       setIsDecrypting(false);
         const res = await getFileAsArrayBuffer(pdfFile);
-        const flatPdf = await flattenPdf(res);
-        const parseFile = new Parse.File(name, [...flatPdf], "application/pdf");
+        const newArraybuffer = await clearAcroFields(res); // best effort cleanup to prevent stale data
+        const pdfToSave = new Uint8Array(newArraybuffer);
+        const parseFile = new Parse.File(
+          name,
+          [...pdfToSave],
+          "application/pdf"
+        );
         await parseFile.save({
-          progress: (progressValue, loaded, total, { type }) => {
-            if (type === "upload" && progressValue !== null) {
+          progress: (progressValue, loaded, total) => {
+            if (progressValue !== null) {
               const percentCompleted = Math.round((loaded * 100) / total);
               setpercentage(percentCompleted);
             }
@@ -579,8 +666,7 @@ const Forms = (props) => {
             removeFile();
             const title = generateTitleFromFilename(formData?.file?.name);
             setFormData((obj) => ({ ...obj, password: "", Name: title }));
-            const tenantId = localStorage.getItem("TenantId");
-            SaveFileSize(size, fileRes.url, tenantId);
+            SaveFileSize(size, fileRes?.url, tenantId, userId);
             return fileRes.url;
           } else {
             removeFile();
@@ -600,11 +686,13 @@ const Forms = (props) => {
         }
     } catch (err) {
       removeFile();
-      if (err?.response?.status === 401) {
+      if (err?.code === 209) {
+        dispatch(sessionStatus(false));
+      } else if (err?.response?.status === 401) {
         setIsPassword(true);
         setIsCorrectPass(false);
       } else {
-        console.log("Error uploading file: ", err?.response);
+        console.error("File upload error: ", err?.response);
         setFormData((prev) => ({ ...prev, password: "" }));
         setIsDecrypting(false);
         if (inputFileRef.current) {
@@ -628,12 +716,35 @@ const Forms = (props) => {
     setFormData((obj) => ({ ...obj, NotifyOnSignatures: value }));
   };
 
+  const handleColorsChange = (color) => {
+    setSelectedColors((prev) => {
+      // If user tries to uncheck the last remaining color → block it
+      if (prev.length === 1 && prev.includes(color)) {
+        return prev;
+      }
+
+      // Normal toggle behavior
+      return prev.includes(color)
+        ? prev.filter((c) => c !== color) // remove
+        : [...prev, color]; // add
+    });
+  };
+
+
+  const reminderCustomWarning = (e) => {
+    if (!formData.remindOnceInEvery || formData.remindOnceInEvery === 0) {
+      return e.target.setCustomValidity(t("input-required"));
+    } else {
+      return e.target.setCustomValidity(t("reminder-error"));
+    }
+  };
   return (
-    <div className="shadow-md rounded-box my-[2px] p-3 bg-base-100 text-base-content">
-      <Title title={props?.title} />
+    <div
+      className={`${isSubmit || isInitializing ? "" : "shadow-md rounded-box my-[2px] p-3 bg-base-100 text-base-content"}`}
+    >
       {isAlert?.message && <Alert type={isAlert.type}>{isAlert.message}</Alert>}
-      {isSubmit ? (
-        <div className="h-[300px] flex justify-center items-center">
+      {isSubmit || isInitializing ? (
+        <div className="flex flex-col justify-center items-center h-[100vh]">
           <Loader />
         </div>
       ) : (
@@ -654,7 +765,7 @@ const Forms = (props) => {
                   value={formData.password}
                   onChange={(e) => handleStrInput(e)}
                   className="w-full op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content text-xs"
-                  placeholder="Enter pdf password"
+                  placeholder={t("enter-pdf-password")}
                   onInvalid={(e) =>
                     e.target.setCustomValidity(t("input-required"))
                   }
@@ -724,16 +835,16 @@ const Forms = (props) => {
                 <div className="flex gap-1 justify-center items-center">
                   <div className="flex justify-between items-center op-input op-input-bordered op-input-sm w-full h-full text-[13px]">
                     <div className="break-all cursor-default">
-                      {t("file-selected")}: {selectedFiles.join(", ")}
+                      {t("files-selected")}: {selectedFiles.join(", ")}
                     </div>
                     <div
                       onClick={() => {
                         setFileUpload("");
                         setSelectedFiles([]);
                       }}
-                      className="cursor-pointer px-[10px] text-[20px] font-bold text-red-500"
+                      className="cursor-pointer ml-[10px] text-[20px] font-bold"
                     >
-                      <i className="fa-light fa-xmark"></i>
+                      <i className="fa-light fa-xmark inline-flex h-7 w-7 items-center justify-center rounded-full hover:bg-red-100 text-red-500" />
                     </div>
                   </div>
                 </div>
@@ -790,7 +901,8 @@ const Forms = (props) => {
                 label={t("signers")}
                 onChange={handleSigners}
                 isReset={isReset}
-                helptextZindex={50}
+                zindex={50}
+                isAddYourSelfCheckbox
                 required
               />
             )}
@@ -818,8 +930,8 @@ const Forms = (props) => {
                 isReset={isReset}
               />
             ) : (
-              <div className="flex flex-col md:flex-row w-full mt-4 md:mt-10 gap-3 ">
-                <div className="card bg-base-100 rounded-box  flex-grow p-3  ">
+              <div className="flex flex-col md:flex-row w-full mt-4 md:mt-10 gap-3">
+                <div className="card bg-base-100 rounded-box flex-grow-0 w-full p-3">
                   {props.title !== "New Template" ? (
                     <SelectFolder
                       onSuccess={handleFolder}
@@ -890,6 +1002,27 @@ const Forms = (props) => {
                             <div className="text-center">{t("no")}</div>
                           </div>
                         </div>
+                        {formData.SendinOrder === "true" && (
+                          <div className="flex items-center gap-2 ml-2 mt-1 mb-1">
+                            <input
+                              type="checkbox"
+                              className="op-checkbox op-checkbox-xs"
+                              name="SendInOrderStrict"
+                              checked={formData.SendInOrderStrict === "true"}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  SendInOrderStrict: e.target.checked
+                                    ? "true"
+                                    : "false"
+                                })
+                              }
+                            />
+                            <span title={t("strict-order-help")}>
+                              {t("strict-order")}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -910,10 +1043,10 @@ const Forms = (props) => {
                               name="remindOnceInEvery"
                               className="op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content w-full text-xs"
                               onChange={handleStrInput}
-                              onInvalid={(e) =>
-                                e.target.setCustomValidity(t("input-required"))
-                              }
+                              onInvalid={(e) => reminderCustomWarning(e)}
                               onInput={(e) => e.target.setCustomValidity("")}
+                              min={1}
+                              max={formData?.TimeToCompleteDays}
                               required
                             />
                           </div>
@@ -991,6 +1124,29 @@ const Forms = (props) => {
                                 <div className="text-center">{t("no")}</div>
                               </div>
                             </div>
+                            {formData.SendinOrder === "true" && (
+                              <div className="flex items-center gap-2 ml-2 mt-1 mb-1">
+                                <input
+                                  type="checkbox"
+                                  className="op-checkbox op-checkbox-xs"
+                                  name="SendInOrderStrict"
+                                  checked={
+                                    formData.SendInOrderStrict === "true"
+                                  }
+                                  onChange={(e) =>
+                                    setFormData({
+                                      ...formData,
+                                      SendInOrderStrict: e.target.checked
+                                        ? "true"
+                                        : "false"
+                                    })
+                                  }
+                                />
+                                <span title={t("strict-order-help")}>
+                                  {t("strict-order")}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </>
                       )}
@@ -1013,6 +1169,7 @@ const Forms = (props) => {
                                 e.target.setCustomValidity(t("input-required"))
                               }
                               onInput={(e) => e.target.setCustomValidity("")}
+                              min={1}
                               required
                             />
                           </div>
@@ -1024,9 +1181,22 @@ const Forms = (props) => {
                           initialData={bcc}
                           onChange={handleBcc}
                           isReset={isReset}
-                          helptextZindex={50}
+                          zindex={50}
                           helpText={t("bcc-help")}
                           isCaptureAllData
+                          isAddYourSelfCheckbox
+                        />
+                      )}
+                      {props.cc && (
+                        <SignersInput
+                          label={t("Cc")}
+                          initialData={cc}
+                          onChange={handleCc}
+                          isReset={isReset}
+                          zindex={50}
+                          helpText={t("cc-help")}
+                          isCaptureAllData
+                          isAddYourSelfCheckbox
                         />
                       )}
                     </>
@@ -1044,7 +1214,7 @@ const Forms = (props) => {
                   ></div>
                 )}
                 {isAdvanceOpt && (
-                  <div className="card bg-base-100 rounded-box  p-3 flex-grow ">
+                  <div className="card bg-base-100 rounded-box p-3 flex-grow-0 w-full">
                     {formData?.autoreminder === true &&
                       props.title !== "New Template" && (
                         <div className="text-xs mt-2">
@@ -1058,10 +1228,10 @@ const Forms = (props) => {
                             name="remindOnceInEvery"
                             className="op-input op-input-bordered op-input-sm focus:outline-none hover:border-base-content w-full text-xs"
                             onChange={handleStrInput}
-                            onInvalid={(e) =>
-                              e.target.setCustomValidity(t("input-required"))
-                            }
+                            onInvalid={(e) => reminderCustomWarning(e)}
                             onInput={(e) => e.target.setCustomValidity("")}
+                            min={1}
+                            max={formData?.TimeToCompleteDays}
                             required
                           />
                         </div>
@@ -1188,6 +1358,46 @@ const Forms = (props) => {
                         onInput={(e) => e.target.setCustomValidity("")}
                       />
                     </div>
+                    {props.title !== "Sign Yourself" && (
+                      <div className="text-xs mt-3">
+                        <label htmlFor="penColors">
+                          {t("pen-colors")}
+                          <a
+                            data-tooltip-id="pen-colors-tooltip"
+                            className="ml-1"
+                          >
+                            <sup>
+                              <i className="fa-light fa-question rounded-full border-[#33bbff] text-[#33bbff] text-[13px] border-[1px] py-[1.5px] px-[4px]"></i>
+                            </sup>
+                          </a>
+                          <Tooltip id="pen-colors-tooltip" className="z-[999]">
+                            <div className="max-w-[200px] md:max-w-[450px]">
+                              <p className="font-bold">{t("pen-colors")}</p>
+                              <div>{t("pen-colors-help")}</div>
+                            </div>
+                          </Tooltip>
+                        </label>
+                        <div className="ml-[7px] flex flex-col md:flex-row gap-[10px] mb-[0.7rem]">
+                          {pensList.map((color) => (
+                            <div
+                              key={color}
+                              className="flex flex-row gap-[5px] items-center"
+                            >
+                              <input
+                                className="mr-[2px] op-checkbox op-checkbox-xs"
+                                type="checkbox"
+                                name="penColors"
+                                checked={selectedColors.includes(color)}
+                                onChange={() => handleColorsChange(color)}
+                              />
+                              <div className="hover:underline underline-offset-2 cursor-default capitalize">
+                                {color}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1221,7 +1431,7 @@ const Forms = (props) => {
                 {t("next")}
               </button>
               <div
-                className="op-btn op-btn-ghost"
+                className="op-btn op-btn-ghost text-base-content"
                 onClick={() => handleCancel()}
               >
                 {t("cancel")}

@@ -1,19 +1,21 @@
-import React, { useEffect, useState, useRef } from "react";
-import ReportTable from "../primitives/GetReportDisplay";
+import { useEffect, useState, useRef } from "react";
 import Parse from "parse";
 import axios from "axios";
-import reportJson from "../json/ReportJson";
+import reportJson, { extraCols } from "../json/ReportJson";
 import { useParams } from "react-router";
-import Title from "../components/Title";
 import PageNotFound from "./PageNotFound";
-import TourContentWithBtn from "../primitives/TourContentWithBtn";
 import Loader from "../primitives/Loader";
-import { useTranslation } from "react-i18next";
+import Contactbook from "../reports/contact/Contactbook";
+import ColumnSelector from "../components/ColumnSelector";
+import TemplatesReport from "../reports/template/TemplatesReport";
+import DocumentsReport from "../reports/document/DocumentsReport";
+import { templateReportTour } from "../json/ReportTour";
+import { withSessionValidation } from "../utils";
 
 const Report = () => {
-  const { t } = useTranslation();
   const { id } = useParams();
-  const [List, setList] = useState([]);
+  const abortController = new AbortController();
+  const [list, setList] = useState([]);
   const [isLoader, setIsLoader] = useState(true);
   const [reportName, setReportName] = useState("");
   const [reporthelp, setReportHelp] = useState("");
@@ -21,24 +23,42 @@ const Report = () => {
   const [heading, setHeading] = useState([]);
   const [isNextRecord, setIsNextRecord] = useState(false);
   const [isMoreDocs, setIsMoreDocs] = useState(true);
-  const [form, setForm] = useState("");
   const [tourData, setTourData] = useState([]);
-  const [isDontShow, setIsDontShow] = useState(false);
-  const [isImport, setIsImport] = useState(false);
-  const abortController = new AbortController();
-  const docPerPage = 10;
   const [searchTerm, setSearchTerm] = useState("");
+  const [signerStatusFilter, setSignerStatusFilter] = useState("all");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [isSearchResult, setIsSearchResult] = useState(false);
+  const [allColumns, setAllColumns] = useState([]);
+  const [visibleColumns, setVisibleColumns] = useState([]);
+  const [columnLabels, setColumnLabels] = useState({});
+  const [defaultColumns, setDefaultColumns] = useState([]);
+  const [isColumnModal, setIsColumnModal] = useState(false);
+  const [searchLoader, setSearchLoader] = useState(false);
   const debounceTimer = useRef(null);
+  const hasMountedSignerFilter = useRef(false);
+  const searchAbortRef = useRef(null); // holds AbortController
+  // Number of documents to display per page (should always be half of docLimit for proper pagination)
+  const docPerPage = 10;
+  // Number of documents to fetch per API call
+  const docLimit = 20;
+
 
   // below useEffect is call when id param change
   useEffect(() => {
     setReportName("");
     setList([]);
     setSearchTerm("");
+    setSignerStatusFilter("all");
     setMobileSearchOpen(false);
-    getReportData(0, docPerPage, "");
+    const saved = JSON.parse(localStorage.getItem("reportColumns") || "{}");
+    if (saved[id]) {
+      setVisibleColumns(saved[id].visible || saved[id]);
+      setColumnLabels(saved[id].labels || {});
+    } else {
+      setVisibleColumns([]);
+      setColumnLabels({});
+    }
+    getReportData(0, docLimit, "");
 
     // Function returned from useEffect is called on unmount
     return () => {
@@ -47,6 +67,10 @@ const Report = () => {
       setIsNextRecord(false);
       // Here it'll abort the fetch
       abortController.abort();
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+        searchAbortRef.current = null;
+      }
     };
     // eslint-disable-next-line
   }, [id]);
@@ -54,22 +78,51 @@ const Report = () => {
   // below useEffect call when isNextRecord state is true and fetch next record
   useEffect(() => {
     if (isNextRecord) {
-      getReportData(List.length, 20, searchTerm);
+      getReportData(list?.length, docLimit, searchTerm);
     }
     // eslint-disable-next-line
   }, [isNextRecord]);
 
-  const handleDontShow = (isChecked) => {
-    setIsDontShow(isChecked);
+  useEffect(() => {
+    if (!hasMountedSignerFilter.current) {
+      hasMountedSignerFilter.current = true;
+      return;
+    }
+    setList([]);
+    setIsNextRecord(false);
+    setIsMoreDocs(true);
+    getDocumentbyUserStatus();
+    // eslint-disable-next-line
+  }, [signerStatusFilter]);
+
+  const getDocumentbyUserStatus = async () => {
+    setSearchLoader(true);
+    try {
+      await getReportData(0, docLimit, searchTerm, signerStatusFilter);
+    } catch (error) {
+      console.error("get report by user status error", error);
+    } finally {
+      setSearchLoader(false);
+    }
   };
 
-  const handleSearchChange = async (e) => {
+  const handleSearchChange = withSessionValidation(async (e) => {
     const term = e.target.value.toLowerCase();
     setSearchTerm(term);
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
+    // 2) abort any in-flight request triggered by older debounce
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
+    }
     debounceTimer.current = setTimeout(async () => {
+      // create controller for THIS request
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+
+      setSearchLoader(true);
       try {
         const headers = {
           "Content-Type": "application/json",
@@ -79,22 +132,38 @@ const Report = () => {
         const url = `${localStorage.getItem("baseUrl")}functions/getReport`;
         const res = await axios.post(
           url,
-          { reportId: id, searchTerm: term, skip: 0, limit: docPerPage },
-          { headers }
+          {
+            reportId: id,
+            searchTerm: term,
+            signerStatus: signerStatusFilter,
+            skip: 0,
+            limit: docPerPage
+          },
+          { headers: headers, signal: controller.signal } // ✅ axios abort
         );
+        // if you want to be extra safe (ignore late responses)
+        if (controller.signal.aborted) return;
+
         const data = res.data?.result || [];
         if (!data.error) {
           setList(data);
           setIsMoreDocs(data.length >= docPerPage);
           setIsNextRecord(false);
           setIsSearchResult(true);
+          setSearchLoader(false);
         }
       } catch (err) {
-        console.error("Search error:", err);
+        // ✅ ignore abort errors
+        const isAbort =
+          err?.name === "CanceledError" ||
+          err?.code === "ERR_CANCELED" ||
+          err?.message?.toLowerCase?.().includes("canceled");
+        if (!isAbort) console.error("Search error:", err);
+        setSearchLoader(false);
       }
     }, 300);
     setIsSearchResult(false);
-  };
+  });
 
   const handleSearchPaste = (e) => {
     setTimeout(() => {
@@ -109,167 +178,184 @@ const Report = () => {
       }
     };
   }, []);
-  const getReportData = async (
-    skipUserRecord = 0,
-    limit = 20,
-    term = searchTerm
-  ) => {
-    // setIsLoader(true);
-    const json = reportJson(id);
-    if (json) {
-      setActions(json.actions);
-      setHeading(json.heading);
-      setReportName(json.reportName);
-      setForm(json.form);
-      setReportHelp(json?.helpMsg);
-      setIsImport(json?.import || false);
-      const currentUser = Parse.User.current().id;
-
-      const headers = {
-        "Content-Type": "application/json",
-        "X-Parse-Application-Id": localStorage.getItem("parseAppId"),
-        sessiontoken: localStorage.getItem("accesstoken")
-      };
-      try {
-        const skipRecord = id === "4Hhwbp482K" ? 0 : skipUserRecord;
-        const limitRecord = id === "4Hhwbp482K" ? 200 : limit;
-        const params = { reportId: id, skip: skipRecord, limit: limitRecord };
-        if (term) {
-          params.searchTerm = term;
+  const getReportData = withSessionValidation(
+    async (
+      skipUserRecord = 0,
+      limit = 20,
+      term = searchTerm,
+      signerStatus = signerStatusFilter
+    ) => {
+      // setIsLoader(true);
+      const json = reportJson(id);
+      if (json) {
+        setActions(json.actions);
+        const savedCols = JSON.parse(
+          localStorage.getItem("reportColumns") || "{}"
+        );
+        const visible = savedCols[id]?.visible || json.heading;
+        const labels = savedCols[id]?.labels || {};
+        if (!savedCols[id] || id === "contacts") {
+          savedCols[id] = { visible: json.heading, labels: {} };
+          localStorage.setItem("reportColumns", JSON.stringify(savedCols));
         }
-        const url = `${localStorage.getItem("baseUrl")}functions/getReport`;
-        const res = await axios.post(url, params, {
-          headers: headers,
-          signal: abortController.signal // is used to cancel fetch query
-        });
-        if (id === "6TeaPr321t") {
-          const tourConfig = [
-            {
-              selector: "[data-tut=reactourFirst]",
-              content: () => (
-                <TourContentWithBtn
-                  message={t("tour-mssg.report-1")}
-                  isChecked={handleDontShow}
-                />
-              ),
-              position: "top",
-              style: { fontSize: "13px" }
-            }
-          ];
+        setVisibleColumns(visible);
+        setColumnLabels(labels);
+        setHeading(visible);
+        setDefaultColumns(json.heading);
+        setReportName(json.reportName);
+        setReportHelp(json?.helpMsg);
+        const currentUser = Parse.User.current().id;
 
-          if (res.data.result && res.data.result?.length > 0) {
-            json.actions.map((data) => {
-              const newConfig = {
-                selector: `[data-tut="${data?.selector}"]`,
-                content: () => (
-                  <TourContentWithBtn
-                    message={t(`tour-mssg.${data?.action}`)}
-                    isChecked={handleDontShow}
-                  />
-                ),
-                position: "top",
-                style: { fontSize: "13px" }
-              };
-              tourConfig.push(newConfig);
-            });
+        const headers = {
+          "Content-Type": "application/json",
+          "X-Parse-Application-Id": localStorage.getItem("parseAppId"),
+          sessiontoken: localStorage.getItem("accesstoken")
+        };
+        try {
+          const skipRecord = id === "4Hhwbp482K" ? 0 : skipUserRecord;
+          const limitRecord = id === "4Hhwbp482K" ? 200 : limit;
+          const params = { reportId: id, skip: skipRecord, limit: limitRecord };
+          if (term) {
+            params.searchTerm = term;
           }
-
-          setTourData(tourConfig);
-        }
-        if (id === "4Hhwbp482K") {
-          const listData = res.data?.result.filter((x) => x.Signers.length > 0);
-          let arr = [];
-          for (const obj of listData) {
-            const isSigner = obj?.Signers?.some(
-              (item) => item.UserId.objectId === currentUser
+          if (signerStatus && signerStatus !== "all") {
+            params.signerStatus = signerStatus;
+          }
+          const url = `${localStorage.getItem("baseUrl")}functions/getReport`;
+          const res = await axios.post(url, params, {
+            headers: headers,
+            signal: abortController.signal // is used to cancel fetch query
+          });
+          const extraHeads =
+            id === "4Hhwbp482K" ? [...extraCols, "Expiry Date"] : extraCols;
+          setAllColumns(Array.from(new Set([...json.heading, ...extraHeads])));
+          if (id === "6TeaPr321t") {
+            setTourData(templateReportTour);
+          }
+          if (id === "4Hhwbp482K") {
+            const listData = res.data?.result.filter(
+              (x) => x.Signers.length > 0
             );
-            if (isSigner) {
-              let isRecord;
-              if (obj?.AuditTrail && obj?.AuditTrail.length > 0) {
-                isRecord = obj?.AuditTrail.some(
-                  (item) =>
-                    item?.UserPtr?.UserId?.objectId === currentUser &&
-                    item.Activity === "Signed"
-                );
-              } else {
-                isRecord = false;
-              }
-              if (isRecord === false) {
-                arr.push(obj);
+            let arr = [];
+            for (const obj of listData) {
+              const isSigner = obj?.Signers?.some(
+                (item) => item.UserId.objectId === currentUser
+              );
+              if (isSigner) {
+                let isRecord;
+                if (obj?.AuditTrail && obj?.AuditTrail.length > 0) {
+                  isRecord = obj?.AuditTrail.some(
+                    (item) =>
+                      item?.UserPtr?.UserId?.objectId === currentUser &&
+                      item.Activity === "Signed"
+                  );
+                } else {
+                  isRecord = false;
+                }
+                if (isRecord === false) {
+                  arr.push(obj);
+                }
               }
             }
-          }
-          if (arr.length === docPerPage) {
-            setIsMoreDocs(true);
-          } else {
-            setIsMoreDocs(false);
-          }
-          setList((prevRecord) =>
-            prevRecord.length > 0 ? [...prevRecord, ...arr] : arr
-          );
-        } else {
-          if (res.data.result.length >= docPerPage) {
-            setIsMoreDocs(true);
-          } else {
-            setIsMoreDocs(false);
-          }
-          if (!res.data.result.error) {
-            setIsNextRecord(false);
+            if (arr.length === docPerPage) {
+              setIsMoreDocs(true);
+            } else {
+              setIsMoreDocs(false);
+            }
             setList((prevRecord) =>
-              prevRecord.length > 0
-                ? [...prevRecord, ...res.data.result]
-                : res.data.result
+              prevRecord.length > 0 ? [...prevRecord, ...arr] : arr
             );
+          } else {
+            if (res.data.result.length >= docPerPage) {
+              setIsMoreDocs(true);
+            } else {
+              setIsMoreDocs(false);
+            }
+            if (!res.data.result.error) {
+              setIsNextRecord(false);
+              setList((prevRecord) =>
+                prevRecord.length > 0
+                  ? [...prevRecord, ...res.data.result]
+                  : res.data.result
+              );
+            }
+          }
+          setIsLoader(false);
+        } catch (err) {
+          const isCancel = axios.isCancel(err);
+          if (!isCancel) {
+            console.error("getreport error", err);
+            setIsLoader(false);
           }
         }
+      } else {
         setIsLoader(false);
-      } catch (err) {
-        const isCancel = axios.isCancel(err);
-        if (!isCancel) {
-          console.log("err ", err);
-          setIsLoader(false);
-        }
       }
-    } else {
-      setIsLoader(false);
     }
+  );
+
+  const commonProps = {
+    ReportName: reportName,
+    List: list,
+    setList,
+    actions: actions,
+    heading: heading,
+    setIsNextRecord,
+    isMoreDocs,
+    docPerPage,
+    mobileSearchOpen,
+    setMobileSearchOpen,
+    searchTerm,
+    handleSearchChange,
+    handleSearchPaste,
+    isSearchResult,
+    columnLabels,
+    searchLoader,
+    signerStatusFilter,
+    handleSignerStatusFilter: setSignerStatusFilter,
+    openColumnModal: () => setIsColumnModal(true)
   };
   return (
     <>
-      <Title title={reportName} />
       {isLoader ? (
         <div className="h-[100vh] flex justify-center items-center">
           <Loader />
         </div>
       ) : (
         <>
-          {reportName ? (
-            <ReportTable
-              ReportName={reportName}
-              List={List}
-              setList={setList}
-              actions={actions}
-              heading={heading}
-              setIsNextRecord={setIsNextRecord}
-              isMoreDocs={isMoreDocs}
-              docPerPage={docPerPage}
-              form={form}
+          {id === "contacts" ? (
+            <Contactbook {...commonProps} />
+          ) : id === "6TeaPr321t" ? (
+            <TemplatesReport
+              {...commonProps}
               report_help={reporthelp}
               tourData={tourData}
-              isDontShow={isDontShow}
-              mobileSearchOpen={mobileSearchOpen}
-              setMobileSearchOpen={setMobileSearchOpen}
-              searchTerm={searchTerm}
-              handleSearchChange={handleSearchChange}
-              handleSearchPaste={handleSearchPaste}
-              isSearchResult={isSearchResult}
-              isImport={isImport}
             />
+          ) : reportName ? (
+            <DocumentsReport {...commonProps} report_help={reporthelp} />
           ) : (
             <PageNotFound prefix={"Report"} />
           )}
         </>
       )}
+      <ColumnSelector
+        isOpen={isColumnModal}
+        allColumns={allColumns}
+        visibleColumns={visibleColumns}
+        columnLabels={columnLabels}
+        defaultColumns={defaultColumns}
+        onApply={(cols, labels) => {
+          setVisibleColumns(cols);
+          setHeading(cols);
+          setColumnLabels(labels);
+          const saved = JSON.parse(
+            localStorage.getItem("reportColumns") || "{}"
+          );
+          saved[id] = { visible: cols, labels };
+          localStorage.setItem("reportColumns", JSON.stringify(saved));
+        }}
+        onClose={() => setIsColumnModal(false)}
+      />
     </>
   );
 };

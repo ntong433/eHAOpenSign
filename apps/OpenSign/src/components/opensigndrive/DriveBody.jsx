@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { memo, useState, useEffect, useRef } from "react";
 import "../../styles/opensigndrive.css";
 import axios from "axios";
 import { ContextMenu } from "radix-ui";
@@ -10,6 +10,7 @@ import FolderModal from "../shared/fields/FolderModal";
 import { useTranslation } from "react-i18next";
 import { handleDownloadPdf, isMobile } from "../../constant/Utils";
 import Parse from "parse";
+import { withSessionValidation } from "../../utils";
 
 function DriveBody(props) {
   const { t } = useTranslation();
@@ -52,13 +53,11 @@ function DriveBody(props) {
     props.setSkip(0);
   };
   //function for change doc name and update doc name in  _document class
-  const handledRenameDoc = async (data) => {
+  const handledRenameDoc = withSessionValidation(async (data) => {
     setRename("");
     const trimmedValue = renameValue.trim();
     if (trimmedValue.length > 0) {
-      const updateName = {
-        Name: renameValue
-      };
+      const updateName = { Name: renameValue };
       const docId = data.objectId;
       const docData = props.pdfData;
       const updatedData = docData.map((item) => {
@@ -71,11 +70,9 @@ function DriveBody(props) {
       });
       props.setPdfData(updatedData);
       props.sortingData(null, null, updatedData);
-      await axios
-        .put(
-          `${localStorage.getItem(
-            "baseUrl"
-          )}classes/contracts_Document/${docId}`,
+      try {
+        await axios.put(
+          `${localStorage.getItem("baseUrl")}classes/contracts_Document/${docId}`,
           updateName,
           {
             headers: {
@@ -84,20 +81,16 @@ function DriveBody(props) {
               "X-Parse-Session-Token": localStorage.getItem("accesstoken")
             }
           }
-        )
-        .then(() => {
-          // const res = result.data;
-          // console.log("res", res);
-        })
-        .catch((err) => {
-          console.log("Err ", err);
-          props.setIsAlert({
-            isShow: true,
-            alertMessage: t("something-went-wrong-mssg")
-          });
+        );
+      } catch (err) {
+        console.error("Error in rename doc", err);
+        props.setIsAlert({
+          isShow: true,
+          alertMessage: t("something-went-wrong-mssg")
         });
+      }
     }
-  };
+  });
 
   //function for navigate user to microapp-signature component
   const checkPdfStatus = async (data) => {
@@ -163,12 +156,10 @@ function DriveBody(props) {
     }
   };
   //function for delete document
-  const handleDeleteDocument = async (docData) => {
+  const handleDeleteDocument = withSessionValidation(async (docData) => {
     setIsDeleteDoc({});
     const docId = docData.objectId;
-    const data = {
-      IsArchive: true
-    };
+    const data = { IsArchive: true };
 
     await axios
       .put(
@@ -190,19 +181,19 @@ function DriveBody(props) {
         }
       })
       .catch((err) => {
-        console.log("Err ", err);
+        console.error("Err in delete doc", err);
         props.setIsAlert({
           isShow: true,
           alertMessage: t("something-went-wrong-mssg")
         });
       });
-  };
+  });
   const handleMoveDocument = async (docData) => {
     setIsOpenMoveModal(true);
     setSelectDoc(docData);
   };
   //function for move document from one folder to another folder
-  const handleMoveFolder = async (selectFolderData) => {
+  const handleMoveFolder = withSessionValidation(async (selectFolderData) => {
     const selecFolderId = selectDoc?.Folder?.objectId;
     const moveFolderId = selectFolderData?.ObjectId;
     let updateDocId = selectDoc?.objectId;
@@ -224,16 +215,12 @@ function DriveBody(props) {
           }
         };
       } else {
-        updateData = {
-          Folder: { __op: "Delete" }
-        };
+        updateData = { Folder: { __op: "Delete" } };
       }
 
       await axios
         .put(
-          `${localStorage.getItem(
-            "baseUrl"
-          )}classes/contracts_Document/${updateDocId}`,
+          `${localStorage.getItem("baseUrl")}classes/contracts_Document/${updateDocId}`,
           updateData,
           {
             headers: {
@@ -243,9 +230,7 @@ function DriveBody(props) {
             }
           }
         )
-
         .then((Listdata) => {
-          // console.log("Listdata ", Listdata);
           const res = Listdata.data;
           if (res) {
             const updatedData = props.pdfData.filter(
@@ -255,7 +240,7 @@ function DriveBody(props) {
           }
         })
         .catch((err) => {
-          console.log("err", err);
+          console.error("err in move folder", err);
         });
 
       setIsOpenMoveModal(false);
@@ -263,7 +248,7 @@ function DriveBody(props) {
       alert(t("folder-already-exist!"));
       setIsOpenMoveModal(false);
     }
-  };
+  });
   const handleEnterPress = (e, data) => {
     if (e.key === "Enter") {
       handledRenameDoc(data);
@@ -303,7 +288,7 @@ function DriveBody(props) {
           props.setPdfData(updatedData);
         }
       } catch (err) {
-        console.log("Err ", err);
+        console.error("Err in delete folder", err);
         props.setIsAlert({
           isShow: true,
           alertMessage: t("something-went-wrong-mssg")
@@ -366,14 +351,14 @@ function DriveBody(props) {
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 512 512"
-              className="w-[26px] h-[26px] fill-current op-text-secondary"
+              className="w-[26px] h-[26px] fill-current"
             >
               <path d="M64 480H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H288c-10.1 0-19.6-4.7-25.6-12.8L243.2 57.6C231.1 41.5 212.1 32 192 32H64C28.7 32 0 60.7 0 96V416c0 35.3 28.7 64 64 64z" />
             </svg>
             <span className="text-[12px] font-medium">{data.Name}</span>
           </td>
           <td>_</td>
-          <td>Folder</td>
+          <td>{t("folder")}</td>
           <td>_</td>
           <td>_</td>
         </tr>
@@ -390,7 +375,7 @@ function DriveBody(props) {
             <span className="text-[12px] font-medium">{data.Name}</span>
           </td>
           <td>{createddate}</td>
-          <td>Pdf</td>
+          <td>{t("pdf")}</td>
           <td>{t(`drive-document-status.${status}`)}</td>
           <td>
             <i
@@ -421,7 +406,7 @@ function DriveBody(props) {
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 512 512"
-                className="w-[100px] h-[100px] fill-current op-text-secondary"
+                className="w-[100px] h-[100px] fill-current"
               >
                 <path d="M64 480H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H288c-10.1 0-19.6-4.7-25.6-12.8L243.2 57.6C231.1 41.5 212.1 32 192 32H64C28.7 32 0 60.7 0 96V416c0 35.3 28.7 64 64 64z" />
               </svg>
@@ -458,14 +443,14 @@ function DriveBody(props) {
                 className="ContextMenuItem"
               >
                 <i className="fa-light fa-font mr-[8px]"></i>
-                <span>Rename</span>
+                <span>{t(`context-menu.Rename`)}</span>
               </ContextMenu.Item>
               <ContextMenu.Item
                 onClick={() => handleMenuItemClick("Delete", data, data.Type)}
                 className="ContextMenuItem"
               >
                 <i className="fa-light fa-trash mr-[8px]"></i>
-                <span>Delete</span>
+                <span>{t(`context-menu.Delete`)}</span>
               </ContextMenu.Item>
             </ContextMenu.Content>
           </ContextMenu.Portal>
@@ -550,7 +535,6 @@ function DriveBody(props) {
                   )
                 )}
               </div>
-
               <ContextMenu.Portal>
                 <ContextMenu.Content
                   className="ContextMenuContent"
@@ -603,7 +587,6 @@ function DriveBody(props) {
                 {signersName()}
               </>
             )}
-
             <HoverCard.Arrow className="HoverCardArrow" />
           </HoverCard.Content>
         </HoverCard.Portal>
@@ -627,21 +610,21 @@ function DriveBody(props) {
               </tr>
             </thead>
             <tbody>
-              {props?.pdfData?.map((data, ind) => {
-                return (
-                  <React.Fragment key={ind}>
-                    {handleFolderData(data, ind, "table")}
-                  </React.Fragment>
-                );
-              })}
+              {props?.pdfData?.map((data, ind) => (
+                <React.Fragment key={ind}>
+                  {handleFolderData(data, ind, "table")}
+                </React.Fragment>
+              ))}
             </tbody>
           </Table>
         </div>
       ) : (
         <div className="flex flex-row flex-wrap items-center mt-1 pb-[20px] mx-[5px]">
-          {props.pdfData.map((data, ind) => {
-            return <React.Fragment key={ind}>{handleFolderData(data, ind, "list")}</React.Fragment>;
-          })}
+          {props?.pdfData?.map((data, ind) => (
+            <React.Fragment key={ind}>
+              {handleFolderData(data, ind, "list")}
+            </React.Fragment>
+          ))}
         </div>
       )}
 
@@ -693,4 +676,4 @@ function DriveBody(props) {
   );
 }
 
-export default DriveBody;
+export default memo(DriveBody);

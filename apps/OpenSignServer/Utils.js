@@ -1,15 +1,32 @@
 import dotenv from 'dotenv';
 import { format, toZonedTime } from 'date-fns-tz';
-import { getSignedLocalUrl } from './cloud/parsefunction/getSignedUrl.js';
-import { PDFDocument } from 'pdf-lib';
+import getPresignedUrl, { getSignedLocalUrl } from './cloud/parsefunction/getSignedUrl.js';
 import crypto from 'node:crypto';
-import axios from 'axios';
-dotenv.config();
+import {
+  PDFDocument,
+  PDFName,
+  rgb,
+  degrees,
+  // StandardFonts,
+  PDFArray,
+  PDFDict,
+} from 'pdf-lib';
+import { parseUploadFile } from './utils/fileUtils.js';
+
+dotenv.config({ quiet: true });
 
 export const cloudServerUrl = 'http://localhost:8080/app';
 export const serverAppId = process.env.APP_ID || 'opensign';
 export const appName = 'OpenSign™';
-
+export const prefillDraftDocWidget = ['date', 'textbox', 'checkbox', 'radio button', 'image'];
+export const prefillDraftTemWidget = [
+  'date',
+  'textbox',
+  'checkbox',
+  'radio button',
+  'image',
+  'dropdown',
+];
 export const MAX_NAME_LENGTH = 250;
 export const MAX_NOTE_LENGTH = 200;
 export const MAX_DESCRIPTION_LENGTH = 500;
@@ -28,6 +45,7 @@ export const color = [
   '#ffffcc',
 ];
 
+export const prefillBlockColor = 'transparent';
 export function replaceMailVaribles(subject, body, variables) {
   let replacedSubject = subject;
   let replacedBody = body;
@@ -49,12 +67,9 @@ export const saveFileUsage = async (size, fileUrl, userId) => {
   //checking server url and save file's size
   try {
     if (userId) {
+      const userPtr = { __type: 'Pointer', className: '_User', objectId: userId };
       const tenantQuery = new Parse.Query('partners_Tenant');
-      tenantQuery.equalTo('UserId', {
-        __type: 'Pointer',
-        className: '_User',
-        objectId: userId,
-      });
+      tenantQuery.equalTo('UserId', userPtr);
       const tenant = await tenantQuery.first({ useMasterKey: true });
       if (tenant) {
         const tenantPtr = { __type: 'Pointer', className: 'partners_Tenant', objectId: tenant.id };
@@ -78,7 +93,7 @@ export const saveFileUsage = async (size, fileUrl, userId) => {
         } catch (err) {
           console.log('err in save usage', err);
         }
-        saveDataFile(size, fileUrl, tenantPtr);
+        saveDataFile(size, fileUrl, tenantPtr, userPtr);
       }
     }
   } catch (err) {
@@ -87,19 +102,20 @@ export const saveFileUsage = async (size, fileUrl, userId) => {
 };
 
 //function for save fileUrl and file size in particular client db class partners_DataFiles
-const saveDataFile = async (size, fileUrl, tenantPtr) => {
+const saveDataFile = async (size, fileUrl, tenantPtr, UserId) => {
   try {
     const newDataFiles = new Parse.Object('partners_DataFiles');
     newDataFiles.set('FileUrl', fileUrl);
     newDataFiles.set('FileSize', size);
     newDataFiles.set('TenantPtr', tenantPtr);
+    newDataFiles.set('UserId', UserId);
     await newDataFiles.save(null, { useMasterKey: true });
   } catch (err) {
     console.log('error in save usage ', err);
   }
 };
 
-export const updateMailCount = async (extUserId, plan, monthchange) => {
+export const updateMailCount = async extUserId => {
   // Update count in contracts_Users class
   const query = new Parse.Query('contracts_Users');
   query.equalTo('objectId', extUserId);
@@ -108,31 +124,7 @@ export const updateMailCount = async (extUserId, plan, monthchange) => {
     const contractUser = await query.first({ useMasterKey: true });
     if (contractUser) {
       const _extRes = JSON.parse(JSON.stringify(contractUser));
-      let updateDate = new Date();
-      if (_extRes?.LastEmailCountReset?.iso) {
-        updateDate = new Date(_extRes?.LastEmailCountReset?.iso);
-        const newDate = new Date();
-        // Update the month while keeping the same day and year
-        updateDate.setMonth(newDate.getMonth());
-        updateDate.setFullYear(newDate.getFullYear());
-      }
       contractUser.increment('EmailCount', 1);
-      if (plan === 'freeplan') {
-        if (monthchange) {
-          contractUser.set('LastEmailCountReset', updateDate);
-          contractUser.set('MonthlyFreeEmails', 1);
-        } else {
-          if (contractUser?.get('MonthlyFreeEmails')) {
-            contractUser.increment('MonthlyFreeEmails', 1);
-            if (contractUser?.get('LastEmailCountReset')) {
-              contractUser.set('LastEmailCountReset', updateDate);
-            }
-          } else {
-            contractUser.set('MonthlyFreeEmails', 1);
-            contractUser.set('LastEmailCountReset', updateDate);
-          }
-        }
-      }
       await contractUser.save(null, { useMasterKey: true });
     }
   } catch (error) {
@@ -164,6 +156,486 @@ export function generateId(length) {
   return result;
 }
 
+/**
+ * FlattenPdf renders field values as static content and removes the interactive
+ * form layer. Signatures are stripped entirely. Non-widget annotations (links,
+ * comments, stamps) are preserved.
+ * @param {string | Uint8Array | ArrayBuffer} pdfFile - pdf file.
+ * @returns {Promise<Uint8Array>} flatPdf - pdf file in Uint8Array
+ */
+export const flattenPdf = async pdfFile => {
+  const pdfDoc = await PDFDocument.load(pdfFile, { ignoreEncryption: true });
+
+  try {
+    const acroFormEntry = pdfDoc.catalog.get(PDFName.of('AcroForm'));
+    const acroForm = pdfDoc.context.lookupMaybe
+      ? pdfDoc.context.lookupMaybe(acroFormEntry)
+      : pdfDoc.context.lookup(acroFormEntry);
+
+    if (acroForm && typeof acroForm.set === 'function') {
+      // Avoid pdf-lib form APIs here; some malformed PDFs crash while
+      // iterating/removing fields. Clearing /Fields directly is safer.
+      acroForm.set(PDFName.of('Fields'), pdfDoc.context.obj([]));
+      acroForm.delete(PDFName.of('XFA'));
+      acroForm.delete(PDFName.of('SigFlags'));
+    }
+  } catch {
+    // If AcroForm is malformed, continue with page annotation cleanup.
+  }
+
+  for (const page of pdfDoc.getPages()) {
+    try {
+      const annotationsRef = page.node.get(PDFName.of('Annots'));
+      if (!annotationsRef) continue;
+
+      const annotations = pdfDoc.context.lookup(annotationsRef);
+      if (!annotations || !annotations.asArray) continue;
+
+      const filtered = annotations.asArray().filter(annotRef => {
+        try {
+          const annot = pdfDoc.context.lookup(annotRef);
+          const subtype = annot?.get(PDFName.of('Subtype'));
+          return subtype?.toString() !== '/Widget';
+        } catch {
+          return true;
+        }
+      });
+
+      if (filtered.length === 0) {
+        page.node.delete(PDFName.of('Annots'));
+      } else {
+        page.node.set(PDFName.of('Annots'), pdfDoc.context.obj(filtered));
+      }
+    } catch {
+      // best effort cleanup
+    }
+  }
+
+  try {
+    pdfDoc.catalog.delete(PDFName.of('AcroForm'));
+  } catch {
+    // best effort cleanup
+  }
+
+  return await pdfDoc.save({ useObjectStreams: false });
+};
+
+/* ---- flattenPdf private helpers ---- */
+
+function _safeGetWidgetsServer(field) {
+  try {
+    return field.acroField?.getWidgets?.() || [];
+  } catch {
+    return [];
+  }
+}
+
+function _getWidgetRectServer(widget, pdfDoc) {
+  try {
+    const r = widget.getRectangle?.();
+    if (r && isFinite(r.x) && isFinite(r.y) && isFinite(r.width) && isFinite(r.height)) {
+      return r;
+    }
+  } catch {
+    /* fall through to manual extraction */
+  }
+
+  try {
+    const rectArr = widget.dict?.lookup?.(PDFName.of('Rect'));
+    if (!rectArr || typeof rectArr.size !== 'function' || rectArr.size() !== 4) return null;
+
+    const x1 = _numberFromPdfObjectServer(rectArr.get(0));
+    const y1 = _numberFromPdfObjectServer(rectArr.get(1));
+    const x2 = _numberFromPdfObjectServer(rectArr.get(2));
+    const y2 = _numberFromPdfObjectServer(rectArr.get(3));
+
+    if ([x1, y1, x2, y2].some(v => !isFinite(v))) return null;
+
+    return {
+      x: Math.min(x1, x2),
+      y: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function _numberFromPdfObjectServer(obj) {
+  if (!obj) return NaN;
+  if (typeof obj.asNumber === 'function') return obj.asNumber();
+  if (typeof obj.numberValue === 'function') return obj.numberValue();
+  return Number(obj?.value ?? obj);
+}
+
+function _getWidgetPageServer(pdfDoc, pages, widget) {
+  try {
+    const pRef = widget.P?.();
+    if (pRef) {
+      for (const page of pages) {
+        if (page.ref === pRef) return page;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  try {
+    const pRef = widget.dict?.get?.(PDFName.of('P'));
+    if (pRef) {
+      for (const page of pages) {
+        if (page.ref === pRef) return page;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  // Fallback: search page annots
+  try {
+    for (const page of pages) {
+      const annots = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      if (!annots) continue;
+
+      for (let i = 0; i < annots.size(); i++) {
+        const ref = annots.get(i);
+        if (ref === widget.ref) return page;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  return null;
+}
+
+function _drawWidgetBoxServer(page, rect) {
+  try {
+    page.drawRectangle({
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      borderWidth: 0.6,
+      borderColor: rgb(0.65, 0.65, 0.65),
+    });
+  } catch {
+    /* best effort */
+  }
+}
+
+function _drawTextFieldServer(page, field, rect, font) {
+  let text = '';
+  try {
+    text = field.getText?.() ?? '';
+  } catch {
+    text = '';
+  }
+  text = String(text ?? '');
+
+  if (!text) return;
+
+  let multiline = false;
+  try {
+    multiline = field.isMultiline?.() ?? false;
+  } catch {
+    /* ignore */
+  }
+
+  let comb = false;
+  try {
+    comb = field.isCombed?.() ?? false;
+  } catch {
+    /* ignore */
+  }
+
+  if (comb) {
+    _drawCombTextServer(page, text, rect, font);
+    return;
+  }
+
+  if (multiline || text.includes('\n')) {
+    _drawMultilineTextServer(page, text, rect, font);
+    return;
+  }
+
+  const fontSize = _fitSingleLineFontSizeServer(text, rect, font);
+  const baselineY = rect.y + Math.max(2, (rect.height - fontSize) / 2);
+
+  page.drawText(text, {
+    x: rect.x + 2,
+    y: baselineY,
+    size: fontSize,
+    font,
+    color: rgb(0, 0, 0),
+    maxWidth: Math.max(1, rect.width - 4),
+  });
+}
+
+function _drawMultilineTextServer(page, text, rect, font) {
+  const lines = String(text).replace(/\r/g, '').split('\n');
+  const fontSize = Math.max(8, Math.min(11, rect.height / Math.max(lines.length + 0.5, 2)));
+  const lineHeight = fontSize + 1.5;
+
+  let y = rect.y + rect.height - fontSize - 2;
+
+  for (const line of lines) {
+    if (y < rect.y + 1) break;
+
+    page.drawText(line, {
+      x: rect.x + 2,
+      y,
+      size: fontSize,
+      font,
+      color: rgb(0, 0, 0),
+      maxWidth: Math.max(1, rect.width - 4),
+      lineHeight,
+    });
+
+    y -= lineHeight;
+  }
+}
+
+function _drawCombTextServer(page, text, rect, font) {
+  const chars = String(text).split('');
+  const count = Math.max(chars.length, 1);
+  const cellWidth = rect.width / count;
+  const fontSize = Math.max(8, Math.min(12, rect.height - 4));
+
+  chars.forEach((ch, i) => {
+    const textWidth = font.widthOfTextAtSize(ch, fontSize);
+    const x = rect.x + i * cellWidth + (cellWidth - textWidth) / 2;
+    const y = rect.y + Math.max(2, (rect.height - fontSize) / 2);
+
+    page.drawText(ch, {
+      x,
+      y,
+      size: fontSize,
+      font,
+      color: rgb(0, 0, 0),
+    });
+
+    if (i < count - 1) {
+      try {
+        page.drawLine({
+          start: { x: rect.x + (i + 1) * cellWidth, y: rect.y },
+          end: { x: rect.x + (i + 1) * cellWidth, y: rect.y + rect.height },
+          thickness: 0.4,
+          color: rgb(0.75, 0.75, 0.75),
+        });
+      } catch {
+        /* best effort */
+      }
+    }
+  });
+}
+
+function _fitSingleLineFontSizeServer(text, rect, font) {
+  let size = Math.min(12, rect.height - 4);
+  size = Math.max(size, 6);
+
+  while (size > 6) {
+    const width = font.widthOfTextAtSize(text, size);
+    if (width <= rect.width - 4) return size;
+    size -= 0.5;
+  }
+
+  return 6;
+}
+
+function _drawCheckBoxServer(page, field, rect, zapf) {
+  let checked = false;
+  try {
+    checked = field.isChecked();
+  } catch {
+    checked = false;
+  }
+
+  if (!checked) return;
+
+  const size = Math.max(8, Math.min(rect.width, rect.height) - 4);
+
+  page.drawText('\u2714', {
+    x: rect.x + Math.max(1, (rect.width - size * 0.7) / 2),
+    y: rect.y + Math.max(1, (rect.height - size) / 2),
+    size,
+    font: zapf,
+    color: rgb(0, 0, 0),
+  });
+}
+
+function _drawRadioGroupServer(page, field, widget, rect) {
+  let selected = null;
+  try {
+    selected = field.getSelected();
+  } catch {
+    selected = null;
+  }
+
+  if (!selected) return;
+
+  let widgetOnValue = null;
+  try {
+    widgetOnValue = widget.getOnValue?.();
+  } catch {
+    /* ignore */
+  }
+
+  if (!widgetOnValue) {
+    try {
+      const ap = widget.dict?.lookupMaybe?.(PDFName.of('AP'), PDFDict);
+      const n = ap?.lookupMaybe?.(PDFName.of('N'), PDFDict);
+      if (n) {
+        const keys = n.keys();
+        for (const k of keys) {
+          const name = k?.decodeText?.() ?? k?.encodedName ?? String(k);
+          if (name !== '/Off' && name !== 'Off') {
+            widgetOnValue = name.replace(/^\//, '');
+            break;
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const selectedStr = String(selected).replace(/^\//, '');
+  const onStr = String(widgetOnValue ?? '').replace(/^\//, '');
+
+  if (!onStr || selectedStr !== onStr) return;
+
+  // Circle outline
+  try {
+    page.drawEllipse({
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2,
+      xScale: rect.width / 2 - 1,
+      yScale: rect.height / 2 - 1,
+      borderWidth: 0.8,
+      borderColor: rgb(0, 0, 0),
+    });
+  } catch {
+    /* best effort */
+  }
+
+  // Inner filled dot
+  try {
+    const r = Math.min(rect.width, rect.height) / 4;
+    page.drawEllipse({
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2,
+      xScale: r,
+      yScale: r,
+      color: rgb(0, 0, 0),
+    });
+  } catch {
+    /* best effort */
+  }
+}
+
+function _drawDropdownServer(page, field, rect, font) {
+  let text = '';
+  try {
+    const selected = field.getSelected?.();
+    if (Array.isArray(selected)) {
+      text = selected.join(', ');
+    } else {
+      text = selected ?? '';
+    }
+  } catch {
+    text = '';
+  }
+
+  text = String(text ?? '');
+  if (!text) return;
+
+  const fontSize = _fitSingleLineFontSizeServer(text, rect, font);
+
+  page.drawText(text, {
+    x: rect.x + 2,
+    y: rect.y + Math.max(2, (rect.height - fontSize) / 2),
+    size: fontSize,
+    font,
+    color: rgb(0, 0, 0),
+    maxWidth: Math.max(1, rect.width - 12),
+  });
+}
+
+function _drawOptionListServer(page, field, rect, font) {
+  let selected = [];
+  try {
+    selected = field.getSelected?.() || [];
+  } catch {
+    selected = [];
+  }
+
+  if (!Array.isArray(selected)) {
+    selected = [selected].filter(Boolean);
+  }
+
+  if (!selected.length) return;
+
+  const lines = selected.map(v => String(v));
+  const fontSize = Math.max(8, Math.min(11, rect.height / Math.max(lines.length + 0.5, 2)));
+  const lineHeight = fontSize + 1.5;
+
+  let y = rect.y + rect.height - fontSize - 2;
+
+  for (const line of lines) {
+    if (y < rect.y + 1) break;
+
+    page.drawText(line, {
+      x: rect.x + 2,
+      y,
+      size: fontSize,
+      font,
+      color: rgb(0, 0, 0),
+      maxWidth: Math.max(1, rect.width - 4),
+    });
+
+    y -= lineHeight;
+  }
+}
+
+/** Remove only Widget annotations; preserve links, stamps, comments, etc. */
+function _removeWidgetAnnotationsServer(pdfDoc) {
+  for (const page of pdfDoc.getPages()) {
+    try {
+      const annotationsRef = page.node.get(PDFName.of('Annots'));
+      if (!annotationsRef) continue;
+
+      const annotations = pdfDoc.context.lookup(annotationsRef);
+      if (!annotations || !annotations.asArray) continue;
+
+      const filtered = annotations.asArray().filter(annotRef => {
+        try {
+          const annot = pdfDoc.context.lookup(annotRef);
+          const subtype = annot?.get(PDFName.of('Subtype'));
+          return subtype?.toString() !== '/Widget';
+        } catch {
+          return true;
+        }
+      });
+
+      if (filtered.length === 0) {
+        page.node.delete(PDFName.of('Annots'));
+      } else {
+        page.node.set(PDFName.of('Annots'), pdfDoc.context.obj(filtered));
+      }
+    } catch {
+      /* best effort */
+    }
+  }
+
+  try {
+    pdfDoc.catalog.delete(PDFName.of('AcroForm'));
+  } catch {
+    /* best effort */
+  }
+}
+
 // Format date and time for the selected timezone
 export const formatTimeInTimezone = (date, timezone) => {
   const nyDate = timezone && toZonedTime(date, timezone);
@@ -175,7 +647,7 @@ export const formatTimeInTimezone = (date, timezone) => {
 
 // `getSecureUrl` is used to return local secure url if local files
 export const getSecureUrl = url => {
-  const fileUrl = new URL(url)?.pathname?.includes('files');
+  const fileUrl = new URL(url)?.pathname?.includes('/files/');
   if (fileUrl) {
     try {
       const file = getSignedLocalUrl(url);
@@ -193,49 +665,11 @@ export const getSecureUrl = url => {
   }
 };
 
-/**
- * FlattenPdf is used to remove existing widgets if present any and flatten pdf.
- * @param {string | Uint8Array | ArrayBuffer} pdfFile - pdf file.
- * @returns {Promise<Uint8Array>} flatPdf - pdf file in unit8arry
- */
-export const flattenPdf = async pdfFile => {
-  try {
-    const pdfDoc = await PDFDocument.load(pdfFile);
-    // Get the form
-    const form = pdfDoc.getForm();
-    // fetch form fields
-    const fields = form.getFields();
-    // remove form all existing fields and their widgets
-    if (fields && fields?.length > 0) {
-      try {
-        for (const field of fields) {
-          while (field.acroField.getWidgets().length) {
-            field.acroField.removeWidget(0);
-          }
-          form.removeField(field);
-        }
-      } catch (err) {
-        console.log('err while removing field from pdf', err);
-      }
-    }
-    // Updates the field appearances to ensure visual changes are reflected.
-    form.updateFieldAppearances();
-    // Flattens the form, converting all form fields into non-editable, static content
-    form.flatten();
-    const flatPdf = await pdfDoc.save({ useObjectStreams: false });
-    return flatPdf;
-  } catch (err) {
-    throw new Error('error in pdf');
-  }
-};
-
 export const mailTemplate = param => {
   const themeColor = '#47a3ad';
   const subject = `${param.senderName} has requested you to sign "${param.title}"`;
   const AppName = appName;
   const logo = `<img src='https://qikinnovation.ams3.digitaloceanspaces.com/logo.png' height='50' />`;
-
-  const opurl = ` <a href='www.opensignlabs.com' target=_blank>here</a>`;
 
   const body =
     "<html><head><meta http-equiv='Content-Type' content='text/html;charset=UTF-8' /></head><body><div style='background-color:#f5f5f5;padding:20px'><div style='background:white;padding-bottom:20px'><div style='padding:10px'>" +
@@ -258,7 +692,7 @@ export const mailTemplate = param => {
     AppName +
     '. For any queries regarding this email, please contact the sender ' +
     param.senderMail +
-    ` directly. If you think this email is inappropriate or spam, you may file a complaint with ${AppName}${opurl}.</p></div></div></body></html>`;
+    ` directly.</p></div></div></body></html>`;
 
   return { subject, body };
 };
@@ -291,6 +725,8 @@ export const selectFormat = data => {
       return 'dd MMMM, yyyy';
     case 'DD.MM.YYYY':
       return 'dd.MM.yyyy';
+    case 'DD-MMM-YYYY':
+      return 'dd-MMM-yyyy';
     default:
       return 'MM/dd/yyyy';
   }
@@ -304,38 +740,81 @@ export function formatDateTime(date, dateFormat, timeZone, is12Hour) {
     : formatTimeInTimezone(date, timeZone);
 }
 
-// Utility: Convert base64 to buffer
-export const base64ToBuffer = base64 => Buffer.from(base64, 'base64');
+export const randomId = (digit = 8) => {
+  // 1. Grab a cryptographically-secure 32-bit random value
+  // Use crypto for stronger randomness
+  const randomBytes = crypto.getRandomValues(new Uint32Array(1));
+  const raw = randomBytes[0]; // 0 … 4,294,967,295
 
-// Utility: Generate SHA-256 hash from PDF page metadata
-const getPdfMetadataHash = async pdfBytes => {
-  const pdfDoc = await PDFDocument.load(pdfBytes);
-  const metaString = pdfDoc
-    .getPages()
-    .map((page, index) => {
-      const { width, height } = page.getSize();
-      return `${index + 1}:${Math.round(width)}x${Math.round(height)}`;
-    })
-    .join('|');
+  // Calculate the min and max for the given digit length
+  const min = Math.pow(10, digit - 1); // e.g., digit=3 → 100
+  const max = Math.pow(10, digit) - 1; // e.g., digit=3 → 999
+  const range = max - min + 1;
 
-  return crypto.createHash('sha256').update(metaString).digest('hex');
+  // Collapse random value into the range and shift
+  return min + (raw % range);
 };
-// Utility: Validate if uploaded file matches original template PDF
-export const handleReplaceFileValidation = async (baseFileUrl, newFileBase64) => {
-  try {
-    const { data } = await axios.get(baseFileUrl, { responseType: 'arraybuffer' });
-    const basePdfBytes = Buffer.from(data);
-    const uploadedPdfBytes = base64ToBuffer(newFileBase64);
+export const handleValidImage = async Placeholder => {
+  const updatedPlaceholders = [];
 
-    const baseHash = await getPdfMetadataHash(basePdfBytes);
-    const uploadedHash = await getPdfMetadataHash(uploadedPdfBytes);
-
-    if (baseHash === uploadedHash) {
-      return { base64: newFileBase64 };
+  for (const placeholder of Placeholder || []) {
+    //Clean and format signerPtr
+    let signerPtr = placeholder.signerPtr;
+    // Check if signerPtr exists and has an id
+    if (signerPtr?.id) {
+      // Case 1: If signerPtr is a Parse Object instance
+      if (signerPtr instanceof Parse.Object) {
+        // If signerPtr has no attributes, it’s a plain pointer already
+        if (!signerPtr.attributes || Object.keys(signerPtr.attributes).length === 0) {
+          // Convert to a clean pointer using Parse’s built-in method
+          signerPtr = signerPtr.toPointer();
+        } else {
+          // If it has attributes, manually construct the pointer object
+          signerPtr = {
+            __type: 'Pointer',
+            className: signerPtr.className,
+            objectId: signerPtr.id,
+          };
+        }
+        // Case 2: If signerPtr is already a plain JS object resembling a pointer
+      } else if (typeof signerPtr === 'object' && signerPtr.className && signerPtr.objectId) {
+        // Normalize it to a valid Parse pointer object
+        signerPtr = {
+          __type: 'Pointer',
+          className: signerPtr.className,
+          objectId: signerPtr.objectId,
+        };
+      }
     }
-    return { error: 'PDFs do NOT match based on page number, width, and height' };
-  } catch (err) {
-    console.error('Validation Error:', err.message);
-    return { error: err.message };
+
+    //Process placeHolder if Role is 'prefill'
+    if (placeholder?.Role === 'prefill') {
+      const updatedRole = [];
+      for (const item of placeholder.placeHolder || []) {
+        const updatedPos = [];
+        for (const posItem of item.pos || []) {
+          if (
+            (posItem?.type === 'image' || posItem?.type === 'draw') &&
+            posItem?.options?.response
+          ) {
+            const validUrl = await getPresignedUrl(posItem?.options?.response);
+            updatedPos.push({
+              ...posItem,
+              ...(item.SignUrl !== undefined && { SignUrl: validUrl }),
+              options: { ...posItem.options, response: validUrl },
+            });
+          } else {
+            updatedPos.push(posItem);
+          }
+        }
+        updatedRole.push({ ...item, pos: updatedPos });
+      }
+
+      updatedPlaceholders.push({ ...placeholder, signerPtr, placeHolder: updatedRole });
+    } else {
+      // Not prefill role, just push as-is
+      updatedPlaceholders.push({ ...placeholder, signerPtr });
+    }
   }
+  return updatedPlaceholders;
 };

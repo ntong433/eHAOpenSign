@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Confetti from "react-confetti"; // Import the confetti library
 import {
@@ -10,7 +10,6 @@ import {
 import ModalUi from "../primitives/ModalUi";
 import Loader from "../primitives/Loader";
 import DownloadPdfZip from "../primitives/DownloadPdfZip";
-import Title from "../components/Title";
 import CheckCircle from "../primitives/CheckCircle";
 
 const DocSuccessPage = () => {
@@ -42,7 +41,7 @@ const DocSuccessPage = () => {
         objectId: docId,
         SignedUrl: docUrl,
         CertificateUrl: certificate,
-        IsCompleted: completed
+        IsCompleted: completed,
       };
       setPdfDetails([details]);
       const base64Pdf = await getBase64FromUrl(docUrl);
@@ -53,7 +52,9 @@ const DocSuccessPage = () => {
   };
 
   const handleDownload = () => {
-    if (pdfDetails?.[0]?.IsCompleted) {
+    if (
+      pdfDetails?.[0]?.IsCompleted
+    ) {
       setIsDownloadModal(true);
     } else {
       handleDownloadPdf(pdfDetails, setIsDownloading, pdfBase64Url);
@@ -62,7 +63,6 @@ const DocSuccessPage = () => {
 
   return (
     <>
-      <Title title="Success" />
       {/* Confetti Effect */}
       {showConfetti && (
         <Confetti width={window.innerWidth} height={window.innerHeight} />
@@ -101,21 +101,26 @@ const DocSuccessPage = () => {
                   <span>{t("download")}</span>
                 </button>
 
-                {pdfDetails?.[0]?.IsCompleted && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleDownloadCertificate(pdfDetails, setIsDownloading)
-                    }
-                    className="font-medium text-sm md:text-[13px] md:px-4 py-2 op-btn op-btn-secondary"
-                  >
-                    <i
-                      className="fa-light fa-award mx-[3px] md:mx-0"
-                      aria-hidden="true"
-                    ></i>
-                    <span>{t("certificate")}</span>
-                  </button>
-                )}
+                {
+                    pdfDetails?.[0]?.IsCompleted && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadCertificate(
+                            pdfDetails,
+                            setIsDownloading
+                          )
+                        }
+                        className="font-medium text-sm md:text-[13px] md:px-4 py-2 op-btn op-btn-secondary"
+                      >
+                        <i
+                          className="fa-light fa-award mx-[3px] md:mx-0"
+                          aria-hidden="true"
+                        ></i>
+                        <span>{t("certificate")}</span>
+                      </button>
+                    )
+                }
                 <button
                   onClick={(e) =>
                     handleToPrint(e, setIsDownloading, pdfDetails)

@@ -5,7 +5,7 @@ import {
   getSignedUrl,
   handleDownloadCertificate,
   handleDownloadPdf,
-  sanitizeFileName
+  fileNameWithUnderscore
 } from "../constant/Utils";
 import Loader from "./Loader";
 import JSZip from "jszip";
@@ -67,7 +67,7 @@ function DownloadPdfZip(props) {
         const pdf2Blob = await pdf2Response.blob();
           // Add files to ZIP
           zip.file(
-            `${sanitizeFileName(pdfName)}_signed_by_${appName}.pdf`,
+            `${fileNameWithUnderscore(pdfName)}_signed_by_${appName}.pdf`,
             pdf1Blob
           );
           zip.file(`Certificate_signed_by_${appName}.pdf`, pdf2Blob);
@@ -75,13 +75,17 @@ function DownloadPdfZip(props) {
           const zipBlob = await zip.generateAsync({ type: "blob" });
           saveAs(
             zipBlob,
-            `${sanitizeFileName(pdfName)}_signed_by_${appName}.zip`
+            `${fileNameWithUnderscore(pdfName)}_signed_by_${appName}.zip`
           );
         setSelectType(1);
         props.setIsDownloadModal(false);
         setIsDownloading("");
       } catch (error) {
-        console.error("Error creating ZIP file:", error);
+        alert(t("something-went-wrong-mssg"));
+        setSelectType(1);
+        props.setIsDownloadModal(false);
+        setIsDownloading("");
+        console.log("Error creating ZIP file:", error);
       }
     }
   };
@@ -92,8 +96,8 @@ function DownloadPdfZip(props) {
       handleClose={() => props.setIsDownloadModal(false)}
     >
       <div className="p-[20px] h-full text-base-content">
-        {downloadType.map((data, ind) => {
-          return (
+        {downloadType
+          .map((data, ind) => (
             <label
               key={ind}
               className="flex items-center gap-1 mb-2 cursor-pointer"
@@ -107,8 +111,7 @@ function DownloadPdfZip(props) {
               />
               {data.label}
             </label>
-          );
-        })}
+          ))}
         <div className="h-[1px] w-full my-[15px] bg-[#9f9f9f]"></div>
         <button
           onClick={() => handleDownload()}

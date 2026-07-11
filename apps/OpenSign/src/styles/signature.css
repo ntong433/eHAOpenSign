@@ -31,7 +31,10 @@
   border: 1px solid #007bff;
   border-radius: 50px;
 }
-
+.prefillCanvas {
+  width: 205px;
+  height: 81px;
+}
 .signatureCanvas {
   width: 440px;
   height: 167px;
@@ -44,8 +47,20 @@
 }
 
 .mysignatureCanvas {
-  width: 456px;
-  height: 180px;
+  width: 370px;
+  height: 146px;
+}
+
+.mystampCanvas {
+  width: 370px;
+  height: 146px;
+}
+
+.intialSignature {
+  border: 2px solid #888;
+  background-color: rgb(255, 255, 255);
+  width: 150px;
+  height: 150px;
 }
 
 [data-theme="opensigndark"] .tabWidth {
@@ -68,13 +83,6 @@
   border-radius: 9999px;
   background-color: #111111;
   /* blue-500 */
-}
-
-.intialSignature {
-  border: 2px solid #888;
-  background-color: rgb(255, 255, 255);
-  width: 180px;
-  height: 180px;
 }
 
 /* Dark mode support for initials box in /managesign */
@@ -117,16 +125,13 @@
   border-color: #4b5563 !important;
 }
 
-.penContainerDefault {
-  width: 460px;
-}
-
 .icon {
   position: absolute;
   font-size: 14px;
   cursor: pointer;
   z-index: 2;
-  background: white;
+  filter: drop-shadow(1px 1px white) drop-shadow(1px -1px white)
+    drop-shadow(1px 0px  white) drop-shadow(-1px 1px white)
 }
 
 .ScrollbarsCustom-TrackY {
@@ -450,7 +455,7 @@ option {
   to prevent sudden quick movement (as the
   navigation bar gets a new position at the top of the
   page (position:fixed and top:0) */
-  .stickyHead+.content {
+  .stickyHead + .content {
     padding-top: 60px;
   }
 }
@@ -466,11 +471,12 @@ option {
     height: 118px;
   }
 
-  .tabWidth {
+  .mystampCanvas {
     width: 300px;
+    height: 118px;
   }
 
-  .penContainerDefault {
+  .tabWidth {
     width: 300px;
   }
 
@@ -498,18 +504,17 @@ option {
     width: 280px;
     height: 111px;
   }
+  .mystampCanvas {
+    width: 280px;
+    height: 111px;
+  }
 
   .tabWidth {
     width: 280px;
   }
 
-  .penContainerDefault {
-    width: 280px;
-  }
-
   .signTab {
     font-weight: 500 !important;
-
     font-size: 10px !important;
   }
 
@@ -528,12 +533,12 @@ option {
     width: 230px;
     height: 91px;
   }
-
-  .tabWidth {
+  .mystampCanvas {
     width: 230px;
+    height: 91px;
   }
 
-  .penContainerDefault {
+  .tabWidth {
     width: 230px;
   }
 
