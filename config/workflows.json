@@ -1,0 +1,42 @@
+{
+  "defaults": {
+    "approvalMode": "sequential",
+    "remindersEnabled": true,
+    "expirationDays": 30,
+    "allowDelegation": true,
+    "allowRevisionRequests": true
+  },
+  "chains": [
+    {
+      "id": "default-document-approval",
+      "name": "Default Document Approval",
+      "enabled": false,
+      "steps": [
+        {
+          "id": "department-manager",
+          "type": "approval",
+          "assignee": "departmentManager",
+          "mode": "sequential"
+        },
+        {
+          "id": "hr",
+          "type": "approval",
+          "assignee": "role:HR",
+          "mode": "sequential"
+        },
+        {
+          "id": "recipient-signature",
+          "type": "signature",
+          "assignee": "recipient",
+          "mode": "sequential"
+        },
+        {
+          "id": "archive",
+          "type": "archive",
+          "assignee": "system",
+          "mode": "sequential"
+        }
+      ]
+    }
+  ]
+}

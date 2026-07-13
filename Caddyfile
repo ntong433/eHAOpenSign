@@ -1,0 +1,11 @@
+:3000 {
+    encode zstd gzip
+
+    handle_path /api/* {
+        reverse_proxy server:8085
+    }
+
+    handle {
+        reverse_proxy client:3000
+    }
+}

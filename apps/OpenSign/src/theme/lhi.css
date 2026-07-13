@@ -1,0 +1,78 @@
+:root {
+  --lhi-primary: #ED3237;
+  --lhi-secondary: #F58634;
+  --lhi-accent: #1F7A4D;
+  --lhi-background: #F7F8FA;
+  --lhi-surface: #FFFFFF;
+  --lhi-text: #1F2933;
+  --lhi-muted: #667085;
+  --lhi-border: #D8DEE8;
+  --lhi-success: #168A4A;
+  --lhi-warning: #B7791F;
+  --lhi-danger: #C81E1E;
+  --lhi-focus: rgba(237, 50, 55, 0.32);
+  --lhi-shadow: 0 18px 48px rgba(31, 41, 51, 0.12);
+}
+
+html[data-theme="opensigncss"],
+html:not([data-theme]) {
+  background: var(--lhi-background);
+}
+
+body {
+  background: var(--lhi-background);
+  color: var(--lhi-text);
+}
+
+.lhi-focus-ring:focus-visible {
+  outline: 3px solid var(--lhi-focus);
+  outline-offset: 2px;
+}
+
+.lhi-surface {
+  background: var(--lhi-surface);
+  border: 1px solid var(--lhi-border);
+  box-shadow: var(--lhi-shadow);
+}
+
+.lhi-gradient {
+  background:
+    radial-gradient(circle at 12% 10%, rgba(245, 134, 52, 0.16), transparent 30%),
+    linear-gradient(135deg, rgba(237, 50, 55, 0.94), rgba(245, 134, 52, 0.92));
+}
+
+.op-input:focus,
+.op-select:focus,
+.op-textarea:focus,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--lhi-focus);
+  outline-offset: 2px;
+}
+
+.op-btn-primary {
+  background-color: var(--lhi-primary);
+  border-color: var(--lhi-primary);
+  color: #fff;
+}
+
+.op-btn-primary:hover {
+  background-color: #cf252b;
+  border-color: #cf252b;
+}
+
+.op-btn-secondary,
+.op-btn-accent {
+  background-color: var(--lhi-secondary);
+  border-color: var(--lhi-secondary);
+  color: #fff;
+}
+
+.op-badge-primary {
+  background-color: rgba(237, 50, 55, 0.12);
+  color: var(--lhi-primary);
+  border-color: rgba(237, 50, 55, 0.24);
+}

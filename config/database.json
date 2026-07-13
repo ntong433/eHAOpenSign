@@ -1,0 +1,14 @@
+{
+  "customClassPrefix": "lhi",
+  "classes": {
+    "departments": "lhi_departments",
+    "workflows": "lhi_workflows",
+    "templates": "lhi_templates",
+    "notifications": "lhi_notifications",
+    "settings": "lhi_settings",
+    "audit": "lhi_audit",
+    "integrations": "lhi_integrations",
+    "documentCategories": "lhi_document_categories",
+    "signaturePolicies": "lhi_signature_policies"
+  }
+}

@@ -1,0 +1,10 @@
+:root {
+  --enterprise-primary-color: #2557a7;
+  --enterprise-secondary-color: #1f7a8c;
+  --enterprise-accent-color: #d97706;
+  --enterprise-login-background: none;
+}
+
+.enterprise-branding-ready {
+  accent-color: var(--enterprise-primary-color);
+}

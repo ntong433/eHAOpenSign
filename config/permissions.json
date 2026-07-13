@@ -1,0 +1,44 @@
+{
+  "roles": [
+    "Super Administrator",
+    "Organization Administrator",
+    "HR",
+    "Legal",
+    "Finance",
+    "Department Manager",
+    "Employee",
+    "External Signer"
+  ],
+  "permissions": {
+    "documents.read": [
+      "Super Administrator",
+      "Organization Administrator",
+      "HR",
+      "Legal",
+      "Finance",
+      "Department Manager",
+      "Employee"
+    ],
+    "documents.approve": [
+      "Super Administrator",
+      "Organization Administrator",
+      "HR",
+      "Legal",
+      "Finance",
+      "Department Manager"
+    ],
+    "templates.manage": [
+      "Super Administrator",
+      "Organization Administrator",
+      "HR",
+      "Legal"
+    ],
+    "audit.read": [
+      "Super Administrator",
+      "Organization Administrator"
+    ],
+    "settings.manage": [
+      "Super Administrator"
+    ]
+  }
+}

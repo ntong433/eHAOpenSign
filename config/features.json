@@ -1,0 +1,21 @@
+{
+  "branding": true,
+  "microsoftEntraId": false,
+  "localAdministrator": true,
+  "organizationDirectory": false,
+  "hrTemplates": false,
+  "workflowEngine": false,
+  "enterpriseDashboard": false,
+  "notifications": false,
+  "audit": true,
+  "rbac": false,
+  "publicEnterpriseApi": true,
+  "integrations": {
+    "microsoftGraph": false,
+    "microsoftTeams": false,
+    "sharePoint": false,
+    "googleWorkspace": false,
+    "slack": false,
+    "webhooks": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "companyName": "Your Organization",
+  "legalName": "Your Organization Ltd.",
+  "shortName": "Enterprise",
+  "domain": "",
+  "supportEmail": "",
+  "websiteUrl": "",
+  "address": {
+    "line1": "",
+    "line2": "",
+    "city": "",
+    "state": "",
+    "postalCode": "",
+    "country": ""
+  }
+}

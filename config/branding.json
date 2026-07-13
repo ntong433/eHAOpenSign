@@ -1,0 +1,38 @@
+{
+  "productName": "OpenSign Enterprise",
+  "companyName": "Your Organization",
+  "metaDescription": "Enterprise document management and e-signature platform.",
+  "logos": {
+    "app": "",
+    "login": "",
+    "favicon": ""
+  },
+  "colors": {
+    "primary": "#2557A7",
+    "secondary": "#1F7A8C",
+    "accent": "#D97706"
+  },
+  "emailTemplates": {
+    "requestSignature": "default",
+    "completion": "default",
+    "approvalRequest": "default",
+    "rejection": "default"
+  },
+  "footer": {
+    "copyrightText": "",
+    "releaseNotesUrl": ""
+  },
+  "about": {
+    "title": "About",
+    "body": ""
+  },
+  "login": {
+    "backgroundImage": "",
+    "logo": ""
+  },
+  "loading": {
+    "logo": "",
+    "message": ""
+  },
+  "icons": {}
+}

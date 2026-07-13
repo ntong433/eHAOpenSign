@@ -1,0 +1,87 @@
+services:
+  gateway:
+    image: caddy:2-alpine
+    container_name: lhi-sign-gateway
+    restart: unless-stopped
+    depends_on:
+      - client
+      - server
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - app-network
+
+  client:
+    build:
+      context: .
+      dockerfile: apps/OpenSign/Dockerfile
+      args:
+        REACT_APP_APPID: ${APP_ID:-opensign}
+        REACT_APP_SERVERURL: ${REACT_APP_SERVERURL:-/api/app}
+        REACT_APP_ENTERPRISE_PRODUCT_NAME: ${REACT_APP_ENTERPRISE_PRODUCT_NAME:-Life Helpers Signature Portal}
+        REACT_APP_ENTERPRISE_COMPANY_NAME: ${REACT_APP_ENTERPRISE_COMPANY_NAME:-Life Helpers Initiative}
+        REACT_APP_ENTERPRISE_META_DESCRIPTION: ${REACT_APP_ENTERPRISE_META_DESCRIPTION:-Enterprise document management and e-signature platform.}
+        VITE_APPID: ${APP_ID:-opensign}
+        VITE_MICROSOFT_CLIENT_ID: ${VITE_MICROSOFT_CLIENT_ID:-}
+        VITE_MICROSOFT_TENANT_ID: ${VITE_MICROSOFT_TENANT_ID:-}
+        VITE_MICROSOFT_REDIRECT_URI: ${VITE_MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org}
+    container_name: lhi-sign-client
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      REACT_APP_SERVERURL: ${REACT_APP_SERVERURL:-/api/app}
+    networks:
+      - app-network
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/OpenSignServer/Dockerfile
+    container_name: lhi-sign-server
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    volumes:
+      - opensign-files:/usr/src/app/files
+    environment:
+      NODE_ENV: production
+      PORT: 8085
+      APP_ID: ${APP_ID:-opensign}
+      MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY in Coolify}
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/opensign}
+      DATABASE_URI: ${DATABASE_URI:-mongodb://mongo:27017/opensign}
+      PARSE_MOUNT: ${PARSE_MOUNT:-/app}
+      SERVER_URL: ${SERVER_URL:-https://sign.lhinigeria.org/api/app}
+      PUBLIC_URL: ${PUBLIC_URL:-https://sign.lhinigeria.org}
+      USE_LOCAL: ${USE_LOCAL:-true}
+      GRAPH_SERVICE_ACCOUNT: ${GRAPH_SERVICE_ACCOUNT:-helpdesk@lhinigeria.org}
+      GRAPH_DEFAULT_SENDER: ${GRAPH_DEFAULT_SENDER:-helpdesk@lhinigeria.org}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org/api/auth/microsoft/callback}
+      PFX_BASE64: ${PFX_BASE64:-}
+      PASS_PHRASE: ${PASS_PHRASE:-}
+    networks:
+      - app-network
+
+  mongo:
+    image: mongo:7
+    container_name: lhi-sign-mongo
+    restart: unless-stopped
+    volumes:
+      - data-volume:/data/db
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  data-volume:
+  opensign-files:
