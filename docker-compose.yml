@@ -10,10 +10,8 @@ services:
         condition: service_healthy
       server:
         condition: service_started
-    ports:
-      - "3000:3000"
-    networks:
-      - app-network
+    expose:
+      - "3000"
 
   client:
     build:
@@ -42,16 +40,14 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    networks:
-      - app-network
 
   server:
     build:
       context: .
       dockerfile: apps/OpenSignServer/Dockerfile
     container_name: lhi-sign-server
-    ports:
-      - "8085:8085"
+    expose:
+      - "8085"
     restart: unless-stopped
     depends_on:
       mongo:
@@ -77,8 +73,6 @@ services:
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org/api/auth/microsoft/callback}
       PFX_BASE64: ${PFX_BASE64:-}
       PASS_PHRASE: ${PASS_PHRASE:-}
-    networks:
-      - app-network
 
   mongo:
     image: mongo:8
@@ -86,12 +80,7 @@ services:
     restart: unless-stopped
     volumes:
       - data-volume:/data/db
-    networks:
-      - app-network
 
-networks:
-  app-network:
-    driver: bridge
 
 volumes:
   data-volume:
