@@ -318,15 +318,18 @@ if (!process.env.TESTING) {
     const isWindows = process.platform === 'win32';
     // console.log('isWindows', isWindows);
     runDbMigrations();
-    const migrate = isWindows
-      ? `set APPLICATION_ID=${serverAppId}&& set SERVER_URL=${cloudServerUrl}&& set MASTER_KEY=${process.env.MASTER_KEY}&& npx parse-dbtool migrate`
-      : `APPLICATION_ID=${serverAppId} SERVER_URL=${cloudServerUrl} MASTER_KEY=${process.env.MASTER_KEY} npx parse-dbtool migrate`;
-    exec(migrate, (error, stdout, stderr) => {
+    exec('npx parse-dbtool migrate', {
+      env: {
+        ...process.env,
+        APPLICATION_ID: serverAppId,
+        SERVER_URL: cloudServerUrl,
+        MASTER_KEY: process.env.MASTER_KEY,
+      },
+    }, (error, stdout, stderr) => {
       if (error) {
         console.error(`Error: ${error.message}`);
         return;
       }
-
       if (stderr) {
         console.error(`Error: ${stderr}`);
         return;
