@@ -47,6 +47,7 @@ function safeJoin(reqPath) {
   let decoded;
   try {
     decoded = decodeURIComponent(reqPath.split("?")[0].split("#")[0]);
+    if (decoded.indexOf('\0') !== -1) return null;
   } catch {
     return null;
   }
