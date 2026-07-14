@@ -1,6 +1,8 @@
 services:
   gateway:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
     container_name: lhi-sign-gateway
     restart: unless-stopped
     depends_on:
@@ -8,8 +10,6 @@ services:
       - server
     ports:
       - "3000:3000"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
     networks:
       - app-network
 
