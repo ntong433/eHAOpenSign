@@ -49,7 +49,6 @@ services:
       - mongo
     volumes:
       - opensign-files:/usr/src/app/files
-      - ./custom:/usr/custom
     environment:
       NODE_ENV: production
       PORT: 8085
@@ -73,7 +72,7 @@ services:
       - app-network
 
   mongo:
-    image: mongo:8
+    image: mongo:7
     container_name: lhi-sign-mongo
     restart: unless-stopped
     volumes:
