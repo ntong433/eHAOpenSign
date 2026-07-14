@@ -23,6 +23,7 @@ ENV PORT=8085
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY apps/OpenSignServer ./
 COPY config ./config
+COPY custom /usr/custom
 RUN mkdir -p files
 
 EXPOSE 8085
