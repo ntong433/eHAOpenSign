@@ -10,7 +10,7 @@ services:
         condition: service_healthy
       server:
         condition: service_started
-    expose:
+    ports:
       - "3000"
 
   client:
@@ -46,7 +46,7 @@ services:
       context: .
       dockerfile: apps/OpenSignServer/Dockerfile
     container_name: lhi-sign-server
-    expose:
+    ports:
       - "8085"
     restart: unless-stopped
     depends_on:
