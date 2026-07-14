@@ -7,15 +7,23 @@ let cachedConfig = null;
 
 export function getAuthConfig() {
   if (cachedConfig) return cachedConfig;
-  const configPath = path.resolve(process.cwd(), '../../config/auth.json');
-  try {
-    const rawData = fs.readFileSync(configPath, 'utf8');
-    cachedConfig = JSON.parse(rawData);
-    return cachedConfig;
-  } catch (err) {
-    console.error('Failed to load config/auth.json', err);
-    return {};
+  const pathsToTry = [
+    path.resolve(process.cwd(), '../../config/auth.json'),
+    path.resolve(process.cwd(), 'config/auth.json')
+  ];
+
+  for (const configPath of pathsToTry) {
+    try {
+      const rawData = fs.readFileSync(configPath, 'utf8');
+      cachedConfig = JSON.parse(rawData);
+      return cachedConfig;
+    } catch (err) {
+      // Ignore and try next path
+    }
   }
+
+  console.error('Failed to load auth.json from any known path');
+  return {};
 }
 
 export function getEnv(envName) {

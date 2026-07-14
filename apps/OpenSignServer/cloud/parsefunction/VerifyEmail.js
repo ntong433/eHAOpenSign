@@ -14,6 +14,14 @@ export default async function VerifyEmail(request) {
 
       const res = await checkOtp.first({ useMasterKey: true });
       if (res) {
+        const expiresAt = res.get('ExpiresAt');
+        if (expiresAt && new Date(expiresAt) < new Date()) {
+          const error = new Error('OTP has expired.');
+          error.code = 400;
+          throw error;
+        }
+        await res.destroy({ useMasterKey: true });
+        
         // Fetch the user by their objectId
         const isEmailVerified = request?.user?.get('emailVerified');
         if (isEmailVerified) {

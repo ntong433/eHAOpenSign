@@ -15,7 +15,8 @@ async function sendMailProvider(req) {
       recipient,
       subject,
       bodyContent: html,
-      startedByUserId: req.user?.id || req.params.startedByUserId
+      startedByUserId: req.user?.id || req.params.startedByUserId,
+      forceApplication: true
     });
 
     if (extUserId) {

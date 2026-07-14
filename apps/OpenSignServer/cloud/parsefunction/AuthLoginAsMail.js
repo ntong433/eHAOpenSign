@@ -3,7 +3,7 @@ import { cloudServerUrl, serverAppId } from '../../Utils.js';
 async function AuthLoginAsMail(request) {
   try {
     //function for login user using user objectId without touching user's password
-    const serverUrl = cloudServerUrl; //process.env.SERVER_URL;
+    const serverUrl = `http://127.0.0.1:${process.env.PORT || 8085}${process.env.PARSE_MOUNT || '/app'}`;
     const APPID = serverAppId;
     const masterKEY = process.env.MASTER_KEY;
 
@@ -21,6 +21,12 @@ async function AuthLoginAsMail(request) {
       let resOtp = res.get('OTP');
 
       if (resOtp === otp) {
+        const expiresAt = res.get('ExpiresAt');
+        if (expiresAt && new Date(expiresAt) < new Date()) {
+          return 'OTP has expired.';
+        }
+        await res.destroy({ useMasterKey: true });
+        
         var result = await getToken(request);
         if (result && !result?.emailVerified) {
           const userQuery = new Parse.Query(Parse.User);

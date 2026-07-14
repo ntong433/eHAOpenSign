@@ -42,11 +42,14 @@ services:
       context: .
       dockerfile: apps/OpenSignServer/Dockerfile
     container_name: lhi-sign-server
+    ports:
+      - "8085:8085"
     restart: unless-stopped
     depends_on:
       - mongo
     volumes:
       - opensign-files:/usr/src/app/files
+      - ./custom:/usr/custom
     environment:
       NODE_ENV: production
       PORT: 8085
@@ -70,7 +73,7 @@ services:
       - app-network
 
   mongo:
-    image: mongo:7
+    image: mongo:8
     container_name: lhi-sign-mongo
     restart: unless-stopped
     volumes:

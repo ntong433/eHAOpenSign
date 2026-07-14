@@ -59,7 +59,10 @@ export default function reportJson(id, currentUserId, currentUserEmail, currentU
           IsCompleted: { $ne: true },
           IsDeclined: { $ne: true },
           IsArchive: { $ne: true },
-          SignedUrl: { $exists: false },
+          $or: [
+            { SignedUrl: { $exists: false } },
+            { DocSentAt: { $exists: false } }
+          ],
           CreatedBy: { __type: 'Pointer', className: '_User', objectId: currentUserId },
         },
         keys: [...commanKeys, ...filterKeys],
@@ -111,6 +114,7 @@ export default function reportJson(id, currentUserId, currentUserEmail, currentU
         params: {
           Type: { $ne: 'Folder' },
           SignedUrl: { $ne: null },
+          DocSentAt: { $exists: true },
           Placeholders: { $ne: null },
           IsCompleted: { $ne: true },
           IsDeclined: { $ne: true },
@@ -181,6 +185,7 @@ export default function reportJson(id, currentUserId, currentUserEmail, currentU
         params: {
           Type: { $ne: 'Folder' },
           SignedUrl: { $ne: null },
+          DocSentAt: { $exists: true },
           Placeholders: { $ne: null },
           IsCompleted: { $ne: true },
           IsDeclined: { $ne: true },
@@ -239,7 +244,10 @@ export default function reportJson(id, currentUserId, currentUserEmail, currentU
           IsCompleted: { $ne: true },
           IsDeclined: { $ne: true },
           IsArchive: { $ne: true },
-          SignedUrl: { $exists: false },
+          $or: [
+            { SignedUrl: { $exists: false } },
+            { DocSentAt: { $exists: false } }
+          ],
           CreatedBy: { __type: 'Pointer', className: '_User', objectId: currentUserId },
         },
         keys: commanKeys,

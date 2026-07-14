@@ -24,7 +24,7 @@ async function sendMailProvider(req) {
     return { status: 'success' };
   } catch (err) {
     console.log(`sendmailv3 Error: ${err.message}`);
-    return { status: 'error' };
+    return { status: 'error', message: err.message };
   }
 }
 

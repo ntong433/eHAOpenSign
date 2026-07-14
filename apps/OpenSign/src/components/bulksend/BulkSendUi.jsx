@@ -423,8 +423,8 @@ const BulkSendUi = (props) => {
           );
           const pdfArrayBuffer = await loadPdfOnce(pdfSignedUrl);
           if (pdfArrayBuffer === "Error") {
-            const error = t("something-went-wrong-mssg");
-            alert(error);
+            const errorMsg = t("something-went-wrong-mssg");
+            alert(errorMsg);
             dispatch(setBulkLoader(false));
             return;
           }

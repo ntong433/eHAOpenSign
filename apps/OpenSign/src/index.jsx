@@ -19,11 +19,13 @@ const serverUrl = serverUrl_fn();
 Parse.initialize(appId);
 Parse.serverURL = serverUrl;
 
-console.log("=== Microsoft Auth Configuration ===");
-console.log("Resolved Client ID:", import.meta.env.VITE_MICROSOFT_CLIENT_ID || "5946f825-88d7-47b9-ae8c-a5ec4df50999");
-console.log("Resolved Tenant ID:", import.meta.env.VITE_MICROSOFT_TENANT_ID || "552a1d00-ce70-4fdb-940f-0ad131e4b9cb");
-console.log("Resolved Redirect URI:", import.meta.env.VITE_MICROSOFT_REDIRECT_URI || "http://localhost:3000");
-console.log("====================================");
+if (import.meta.env.DEV) {
+  console.log("=== Microsoft Auth Configuration ===");
+  console.log("Resolved Client ID:", import.meta.env.VITE_MICROSOFT_CLIENT_ID || "5946f825-88d7-47b9-ae8c-a5ec4df50999");
+  console.log("Resolved Tenant ID:", import.meta.env.VITE_MICROSOFT_TENANT_ID || "552a1d00-ce70-4fdb-940f-0ad131e4b9cb");
+  console.log("Resolved Redirect URI:", import.meta.env.VITE_MICROSOFT_REDIRECT_URI || "http://localhost:3000/auth/microsoft/callback");
+  console.log("====================================");
+}
 
 if (localStorage.getItem("showUpgradeProgress")) {
   showUpgradeProgress();

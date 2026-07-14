@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { cloudServerUrl, serverAppId } from '../../Utils.js';
-const serverUrl = cloudServerUrl; //process.env.SERVER_URL;
+const serverUrl = `http://127.0.0.1:${process.env.PORT || 8085}${process.env.PARSE_MOUNT || '/app'}`;
 const APPID = serverAppId;
 const masterKEY = process.env.MASTER_KEY;
 

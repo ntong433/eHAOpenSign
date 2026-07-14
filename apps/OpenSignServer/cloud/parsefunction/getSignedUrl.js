@@ -7,13 +7,19 @@ import { isAuthenticated } from '../../utils/AuthUtils.js';
 dotenv.config({ quiet: true });
 
 function extractKeyFromUrl(url) {
-  // Create a new URL object
-  const parsedUrl = new URL(url);
-  // Get the pathname of the URL
-  const pathname = parsedUrl.pathname; // e.g. /mybucket/path/to/file.pdf (depends on baseUrl style)
-  // Extract the filename from the pathname
-  const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
-  return filename;
+  if (!url) return '';
+  try {
+    // Create a new URL object
+    const parsedUrl = new URL(url);
+    // Get the pathname of the URL
+    const pathname = parsedUrl.pathname; // e.g. /mybucket/path/to/file.pdf (depends on baseUrl style)
+    // Extract the filename from the pathname
+    const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+    return filename;
+  } catch (err) {
+    const cleanUrl = url.split('?')[0];
+    return cleanUrl.substring(cleanUrl.lastIndexOf('/') + 1);
+  }
 }
 
 function makeEndpoint(endpoint) {
@@ -126,7 +132,16 @@ export async function getSignedUrl(request) {
 }
 
 // Function to generate a signed URL with JWT
-export function getSignedLocalUrl(fileUrl, expirationTimeInSeconds) {
+export function getSignedLocalUrl(originalFileUrl, expirationTimeInSeconds) {
+  let fileUrl = originalFileUrl;
+  const publicServerUrl = process.env.SERVER_URL;
+  if (publicServerUrl && (fileUrl.includes('localhost') || fileUrl.includes('127.0.0.1'))) {
+    const internalMatch = fileUrl.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/api\/app|\/app)?/);
+    if (internalMatch) {
+      fileUrl = fileUrl.replace(internalMatch[0], publicServerUrl);
+    }
+  }
+
   const secretKey = process.env.MASTER_KEY;
   const exp = expirationTimeInSeconds || 200;
   try {
@@ -147,8 +162,29 @@ export function getSignedLocalUrl(fileUrl, expirationTimeInSeconds) {
 }
 
 export function presignedlocalUrl(signedUrl, expirationTimeInSeconds) {
-  if (signedUrl?.includes('/files/')) {
-    const fileUrl = signedUrl.split('?')?.[0];
+  let urlStr = '';
+  if (signedUrl && typeof signedUrl === 'object') {
+    if (typeof signedUrl.url === 'function') {
+      urlStr = signedUrl.url();
+    } else if (signedUrl.url) {
+      urlStr = signedUrl.url;
+    } else if (signedUrl._url) {
+      urlStr = signedUrl._url;
+    }
+  } else if (typeof signedUrl === 'string') {
+    urlStr = signedUrl;
+  }
+
+  if (urlStr?.includes('/files/')) {
+    let fileUrl = urlStr.split('?')?.[0];
+    const publicServerUrl = process.env.SERVER_URL;
+    if (publicServerUrl && (fileUrl.includes('localhost') || fileUrl.includes('127.0.0.1'))) {
+      const internalMatch = fileUrl.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/api\/app|\/app)?/);
+      if (internalMatch) {
+        fileUrl = fileUrl.replace(internalMatch[0], publicServerUrl);
+      }
+    }
+
     const secretKey = process.env.MASTER_KEY;
     const exp = expirationTimeInSeconds || 200;
     try {
@@ -182,13 +218,16 @@ export async function validateSignedLocalUrl(signedUrl) {
     const decoded = jwt.verify(token, secretKey);
     // Check if the file URL in the JWT matches the requested file URL
     const fileUrl = signedUrl.split('?')[0];
-    if (decoded.fileUrl !== fileUrl) {
+    const decodedKey = extractKeyFromUrl(decoded.fileUrl);
+    const requestedKey = extractKeyFromUrl(fileUrl);
+    console.log('[DEBUG] decodedKey:', decodedKey, 'requestedKey:', requestedKey, 'decoded.fileUrl:', decoded.fileUrl, 'fileUrl:', fileUrl);
+    if (decodedKey !== requestedKey) {
       throw new Error('Invalid file URL in token.');
     }
     // If the token is valid and not expired, return the file URL
     return signedUrl;
   } catch (error) {
     console.log('Error validating file', error.message);
-    return 'Unauthorized';
+    return 'Unauthorized:' + error.message;
   }
 }

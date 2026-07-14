@@ -34,7 +34,8 @@ async function sendMailOTPv1(request) {
           subject: subject,
           greeting: 'Hello',
           bodyContent: `<div style='padding:20px;'><p style='font-family:system-ui;font-size:14px;'>Your verification code is</p><p style='text-decoration:none;font-weight:bolder;color:#F36F21;font-size:45px;margin:20px;'>${code}</p><p style='font-family:system-ui;font-size:14px;'>This code expires in 10 minutes.</p></div>`,
-          startedByUserId: request.user?.id
+          startedByUserId: request.user?.id,
+          forceApplication: true
         });
         
         console.log('\n=== OTP EMAIL ===');
@@ -70,7 +71,8 @@ async function sendMailOTPv1(request) {
           useMasterKey: true,
         });
         updateOtp.set('OTP', code);
-        updateOtp.save(null, { useMasterKey: true });
+        updateOtp.set('ExpiresAt', new Date(Date.now() + 10 * 60 * 1000));
+        await updateOtp.save(null, { useMasterKey: true });
         //   console.log("update otp Res in tempSendOtp ", updateRes);
       } else {
         const otpClass = Parse.Object.extend('defaultdata_Otp');
@@ -78,6 +80,7 @@ async function sendMailOTPv1(request) {
         newOtpQuery.set('OTP', code);
         newOtpQuery.set('Email', email);
         newOtpQuery.set('TenantId', TenantId);
+        newOtpQuery.set('ExpiresAt', new Date(Date.now() + 10 * 60 * 1000));
         await newOtpQuery.save(null, { useMasterKey: true });
         //   console.log("new otp Res in tempSendOtp ", newRes);
       }

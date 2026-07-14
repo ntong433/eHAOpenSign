@@ -58,7 +58,8 @@ const sendDeleteUserMail = async req => {
         </p>`,
       primaryActionUrl: deleteUrl,
       primaryActionText: 'Confirm Account Deletion',
-      startedByUserId: req.user.id
+      startedByUserId: req.user.id,
+      forceApplication: true
     });
     return 'mail sent.';
   } catch (err) {

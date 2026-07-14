@@ -1111,7 +1111,6 @@ export const createDocument = async (
       IsTourEnabled: Doc?.IsTourEnabled || false,
       AllowModifications: Doc?.AllowModifications || false,
       TimeToCompleteDays: parseInt(Doc?.TimeToCompleteDays) || 15,
-      DocSentAt: { __type: "Date", iso: isoDate },
       ...SignatureType,
       ...NotifyOnSignatures,
       ...SenderName,
@@ -4779,20 +4778,23 @@ export const sendEmailToSigners = async (
     if (pdfDetails[0]?.objectId && sessiontoken) {
       try {
         let data;
+        const nowIso = new Date().toISOString();
         if (customizeMail && isCustomize) {
           data = {
             RequestBody: customizeMail?.body,
             RequestSubject: customizeMail.subject,
-            SendMail: true
+            SendMail: true,
+            DocSentAt: { __type: "Date", iso: nowIso }
           };
         } else if (defaultMail?.body && defaultMail?.subject) {
           data = {
             RequestBody: defaultMail?.body,
             RequestSubject: defaultMail?.subject,
-            SendMail: true
+            SendMail: true,
+            DocSentAt: { __type: "Date", iso: nowIso }
           };
         } else {
-          data = { SendMail: true };
+          data = { SendMail: true, DocSentAt: { __type: "Date", iso: nowIso } };
         }
         const docUrl = `${localStorage.getItem("baseUrl")}classes/contracts_Document`;
         await axios.put(`${docUrl}/${pdfDetails[0]?.objectId}`, data, {
@@ -4809,7 +4811,7 @@ export const sendEmailToSigners = async (
     }
     return { status: "success" };
   } else {
-    return { status: sendMail?.data?.result?.status };
+    return { status: sendMail?.data?.result?.status, message: sendMail?.data?.result?.message };
   }
 };
 /**

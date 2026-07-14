@@ -64,7 +64,11 @@ function CustomizeMail(props) {
       props?.setIsMailModal(false);
       props?.setIsSend(true);
       setIsLoader(false);
-      props?.setMailStatus(statusMap[mailRes?.status] ?? "failed");
+      if (mailRes?.status === "error") {
+        props?.setMailStatus(`error:${mailRes.message || "Unknown error occurred"}`);
+      } else {
+        props?.setMailStatus(statusMap[mailRes?.status] ?? "failed");
+      }
     } else {
       alert("something-went-wrong-mssg");
     }

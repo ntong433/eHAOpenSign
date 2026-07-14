@@ -269,13 +269,15 @@ function PlaceHolderSign() {
       setDocTitle(documentData?.[0]?.Name);
       const url = documentData[0] && documentData[0]?.URL;
       //convert document url in array buffer format to use embed widgets in pdf using pdf-lib
-      const arrayBuffer = await convertPdfArrayBuffer(url);
-      const base64Pdf = await getBase64FromUrl(url);
-      if (arrayBuffer === "Error") {
-        setHandleError(t("something-went-wrong-mssg"));
-      } else {
+      try {
+        const arrayBuffer = await convertPdfArrayBuffer(url);
+        const base64Pdf = await getBase64FromUrl(url);
         setPdfArrayBuffer(arrayBuffer);
         setPdfBase64Url(base64Pdf);
+      } catch (e) {
+        console.log("error", e);
+        const errorMsg = e?.response?.data?.error || e?.message || t("something-went-wrong-mssg");
+        setHandleError(errorMsg);
       }
       setOwner(documentData?.[0]?.ExtUserPtr);
       const alreadyPlaceholder = documentData[0]?.SignedUrl;
@@ -493,7 +495,7 @@ function PlaceHolderSign() {
       if (documentData?.result?.error?.includes("deleted")) {
         setHandleError(t("document-deleted"));
       } else {
-        setHandleError(t("something-went-wrong-mssg"));
+        setHandleError(documentData?.result?.error || t("something-went-wrong-mssg"));
       }
       setIsLoading({ isLoad: false });
     } else {
@@ -502,7 +504,7 @@ function PlaceHolderSign() {
     }
     const res = await contractUsers();
     if (res === "Error: Something went wrong!") {
-      setHandleError(t("something-went-wrong-mssg"));
+      setHandleError(res.message || t("something-went-wrong-mssg"));
       setIsLoading({ isLoad: false });
     } else if (res.length && res[0]?.objectId) {
       setSignerUserId(res[0].objectId);
@@ -1082,7 +1084,8 @@ function PlaceHolderSign() {
       }
     } catch (e) {
       console.log("error", e);
-      alert(t("something-went-wrong-mssg"));
+      const errorMsg = e?.response?.data?.error || e?.message || t("something-went-wrong-mssg");
+      alert(errorMsg);
     }
   };
   //function to use save placeholder details in contracts_document
@@ -1160,7 +1163,8 @@ function PlaceHolderSign() {
         }
       } catch (e) {
         console.log("error", e);
-        alert(t("something-went-wrong-mssg"));
+        const errorMsg = e?.response?.data?.error || e?.message || t("something-went-wrong-mssg");
+        alert(errorMsg);
       }
     } else {
       setIsUiLoading(false);

@@ -47,6 +47,7 @@ export class EmailService {
       _tokenExpiry = Date.now() + (response.data.expires_in - 300) * 1000;
       return _cachedToken;
     } catch (err) {
+      console.error('Token fetch error:', err.response?.data || err.message);
       throw new Error(`Could not get application token for EmailService: ${err.message}`);
     }
   }
@@ -98,7 +99,7 @@ export class EmailService {
     <p>Life Helpers Initiative | Life Helpers Signature Portal</p>
     <p>This is an automated notification generated at ${timestamp}.</p>
     <p>For assistance, contact helpdesk@lhinigeria.org.</p>
-    <p><a href="https://lhinigeria.org">https://lhinigeria.org</a></p>
+    <p><a href="${process.env.PUBLIC_URL || 'https://lhinigeria.org'}">${process.env.PUBLIC_URL || 'https://lhinigeria.org'}</a></p>
   </div>
 </div>
 </body>
@@ -350,6 +351,7 @@ export class EmailService {
             timeout: 15000,
             httpsAgent: new https.Agent({ family: 4 })
           });
+          
           graphRequestId = response.headers['request-id'] || response.headers['client-request-id'] || 'unknown';
           messageId = graphRequestId;
         }

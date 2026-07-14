@@ -15,6 +15,52 @@ import { SSOAuth } from './auth/authadapter.js';
 import runDbMigrations from './migrationdb/index.js';
 import { validateSignedLocalUrl } from './cloud/parsefunction/getSignedUrl.js';
 import { EmailService } from './cloud/services/EmailService.js';
+// Validate required environment configuration
+const requiredEnvVars = ['MASTER_KEY', 'SERVER_URL', 'PUBLIC_URL'];
+const missingVars = [];
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    missingVars.push(envVar);
+  }
+}
+if (!process.env.DATABASE_URI && !process.env.MONGODB_URI) {
+  missingVars.push('DATABASE_URI / MONGODB_URI');
+}
+
+const getOrigin = (urlStr) => {
+  try {
+    return new URL(urlStr).origin;
+  } catch (e) {
+    return urlStr || 'not set';
+  }
+};
+
+const envName = process.env.NODE_ENV || 'development';
+const publicAppOrigin = getOrigin(process.env.PUBLIC_URL);
+const publicParseOrigin = getOrigin(process.env.SERVER_URL);
+const redirectUri = process.env.MICROSOFT_REDIRECT_URI || process.env.VITE_MICROSOFT_REDIRECT_URI || '';
+const microsoftRedirectOrigin = getOrigin(redirectUri);
+const graphSenderMailbox = process.env.GRAPH_DEFAULT_SENDER || process.env.GRAPH_SERVICE_ACCOUNT || 'not set';
+const hasGraphCreds = Boolean(
+  process.env.MICROSOFT_CLIENT_ID &&
+  process.env.MICROSOFT_CLIENT_SECRET &&
+  process.env.MICROSOFT_TENANT_ID
+);
+
+console.log('=== BACKEND STARTUP CONFIGURATION AUDIT ===');
+console.log(`- Environment Name: ${envName}`);
+console.log(`- Public Application Origin: ${publicAppOrigin}`);
+console.log(`- Public Parse Origin: ${publicParseOrigin}`);
+console.log(`- Microsoft Redirect Origin: ${microsoftRedirectOrigin}`);
+console.log(`- Graph Sender Mailbox: ${graphSenderMailbox}`);
+console.log(`- Graph Credentials Present: ${hasGraphCreds}`);
+console.log('============================================');
+
+if (missingVars.length > 0) {
+  console.error(`FATAL: Missing required environment configuration variables: ${missingVars.join(', ')}`);
+  process.exit(1);
+}
+
 let fsAdapter;
 
 if (useLocal !== 'true') {
@@ -129,7 +175,7 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(function (req, res, next) {
   req.headers['x-real-ip'] = getUserIP(req);
-  const publicUrl = 'https://' + req?.get('host');
+  const publicUrl = process.env.PUBLIC_URL || ('https://' + req?.get('host'));
   req.headers['public_url'] = publicUrl;
   next();
 });
@@ -153,13 +199,84 @@ app.use(async function (req, res, next) {
     const origin = serverUrl.pathname === '/api/app' ? serverUrl.origin + '/api' : serverUrl.origin;
     const fileUrl = origin + req.originalUrl;
     const params = fileUrl?.split('?')?.[1];
+    
+    let validationError = null;
+    let fileRes = 'Unauthorized';
     if (params) {
-      const fileRes = await validateSignedLocalUrl(fileUrl);
-      if (fileRes === 'Unauthorized') {
-        return res.status(400).json({ message: 'unauthorized' });
+      fileRes = await validateSignedLocalUrl(fileUrl);
+      if (fileRes.startsWith('Unauthorized')) {
+        validationError = fileRes.split(':')[1] || 'unauthorized';
+        fileRes = 'Unauthorized';
       }
     } else {
-      return res.status(400).json({ message: 'unauthorized' });
+      validationError = 'No query parameters provided';
+    }
+
+    // Capture response status and content type
+    const originalSend = res.send;
+    const originalStatus = res.status;
+    let loggedStatus = 200;
+    let loggedContentType = 'application/pdf';
+
+    res.status = function(code) {
+      loggedStatus = code;
+      return originalStatus.apply(this, arguments);
+    };
+
+    res.send = function(body) {
+      loggedContentType = res.get('Content-Type') || '';
+      printDiagnostics().catch(err => console.error('Diagnostics error:', err));
+      return originalSend.apply(this, arguments);
+    };
+
+    res.on('finish', () => {
+      if (loggedStatus === 200) {
+        loggedContentType = res.get('Content-Type') || 'application/pdf';
+        printDiagnostics().catch(err => console.error('Diagnostics error:', err));
+      }
+    });
+
+    async function printDiagnostics() {
+      if (req._diagnosticsPrinted) return;
+      req._diagnosticsPrinted = true;
+
+      const filename = req.path.substring(req.path.lastIndexOf('/') + 1);
+      let docId = 'unknown';
+      let fieldName = 'unknown';
+      try {
+        const query = new Parse.Query('contracts_Document');
+        query.contains('URL', filename);
+        const doc = await query.first({ useMasterKey: true });
+        if (doc) {
+          docId = doc.id;
+          fieldName = doc.get('URL')?.includes(filename) ? 'URL' : (doc.get('SignedUrl')?.includes(filename) ? 'SignedUrl' : 'URL');
+        } else {
+          const queryTemplate = new Parse.Query('contracts_Template');
+          queryTemplate.contains('URL', filename);
+          const temp = await queryTemplate.first({ useMasterKey: true });
+          if (temp) {
+            docId = temp.id;
+            fieldName = 'URL';
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      console.info('=== PDF REQUEST DIAGNOSTICS ===');
+      console.info(`- Document objectId: ${docId}`);
+      console.info(`- Selected PDF field name: ${fieldName}`);
+      console.info(`- PDF source type: local`);
+      console.info(`- URL origin and path: ${req.protocol || 'http'}://${req.get('host')}${req.path}`);
+      console.info(`- Response status: ${loggedStatus}`);
+      console.info(`- Response content type: ${loggedContentType}`);
+      console.info(`- Actual file-server error message: ${validationError || 'None'}`);
+      console.info('================================');
+    }
+
+    if (fileRes === 'Unauthorized') {
+      res.status(400).json({ message: 'unauthorized' });
+      return;
     }
     next();
   } else {

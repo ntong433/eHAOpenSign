@@ -2359,6 +2359,8 @@ const TemplatePlaceholder = () => {
                 <div className="flex flex-col gap-y-3">
                   <div className="my-3">{handleShareList()}</div>
                 </div>
+              ) : mailStatus?.startsWith("error:") ? (
+                <p>{mailStatus.split("error:")[1]}</p>
               ) : mailStatus === "failed" ? (
                 <p>{t("mail-failed")} </p>
               ) : mailStatus === "emailnotverified" ? (

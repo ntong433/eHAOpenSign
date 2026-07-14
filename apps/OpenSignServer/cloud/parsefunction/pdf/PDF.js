@@ -7,6 +7,7 @@ import {
   saveFileUsage,
   getSecureUrl,
   serverAppId,
+  useLocal,
 } from '../../../Utils.js';
 import GenerateCertificate from './GenerateCertificate.js';
 import { pdflibAddPlaceholder } from '@signpdf/placeholder-pdf-lib';
@@ -220,7 +221,7 @@ function getRequesterEmail(doc = {}) {
 }
 
 function getViewUrl(publicUrl, docId) {
-  const base = publicUrl || process.env.PUBLIC_URL || process.env.APP_URL || '';
+  const base = process.env.PUBLIC_APP_URL || publicUrl || process.env.PUBLIC_URL || process.env.APP_URL || 'https://sign.lhinigeria.org';
   return base ? `${base}/recipientSignPdf/${docId}` : '';
 }
 
@@ -298,7 +299,17 @@ async function rollbackDocumentProcessing(docId, operationId, reason) {
 
 async function verifyStoredPdfUrl(url, traceId) {
   try {
-    const response = await axios.get(url, {
+    let targetUrl = url;
+    if (useLocal === 'true' || url.includes('/files/')) {
+      const publicPrefix = process.env.SERVER_URL || '';
+      const internalPrefix = cloudServerUrl;
+      if (publicPrefix && url.startsWith(publicPrefix)) {
+        targetUrl = url.replace(publicPrefix, internalPrefix);
+      } else {
+        targetUrl = url.replace('http://localhost:3000/api/app', 'http://localhost:8085/app');
+      }
+    }
+    const response = await axios.get(targetUrl, {
       responseType: 'arraybuffer',
       timeout: 15000,
       maxContentLength: 50 * 1024 * 1024,

@@ -97,7 +97,8 @@ async function deductcount(docsCount, extUserId) {
   }
 }
 async function sendMail(document, publicUrl) {
-  const baseUrl = new URL(publicUrl);
+  const publicAppUrl = process.env.PUBLIC_URL || publicUrl || 'https://sign.lhinigeria.org';
+  const baseUrl = new URL(publicAppUrl);
   const timeToCompleteDays = document?.TimeToCompleteDays || 15;
   const ExpireDate = new Date(document.createdAt);
   ExpireDate.setDate(ExpireDate.getDate() + timeToCompleteDays);
@@ -135,7 +136,7 @@ async function sendMail(document, publicUrl) {
         'X-Parse-Application-Id': appId,
       };
       const objectId = signerMail[i]?.signerObjId;
-      const hostUrl = baseUrl.origin;
+      const hostUrl = process.env.PUBLIC_URL || baseUrl.origin;
       let encodeBase64;
       let existSigner = {};
       if (objectId) {
@@ -188,7 +189,18 @@ async function sendMail(document, publicUrl) {
         replyto: senderEmail || '',
         html: replaceVar?.body ? replaceVar?.body : mailTemplate(mailparam).body,
       };
-      await axios.post(url, params, { headers: headers });
+      const response = await axios.post(url, params, { headers: headers });
+      if (response.data?.result?.status === 'success' || response.data?.status === 'success') {
+        const docUrl = `${serverUrl}/classes/contracts_Document/${document.objectId}`;
+        await axios.put(docUrl, {
+          DocSentAt: { __type: 'Date', iso: new Date().toISOString() }
+        }, {
+          headers: {
+            'X-Parse-Application-Id': appId,
+            'X-Parse-Master-Key': process.env.MASTER_KEY || 'opensign'
+          }
+        });
+      }
     } catch (error) {
       console.log('batchdoc sendmail error: ', error);
     }
@@ -355,7 +367,6 @@ async function startBulkSendInBackground(userId, Documents, Ip, parseConfig, typ
         AutomaticReminders: x.AutomaticReminders || false,
         TimeToCompleteDays: x.TimeToCompleteDays ? parseInt(x.TimeToCompleteDays) : 15,
         OriginIp: Ip,
-        DocSentAt: { __type: 'Date', iso: isoDate },
         IsEnableOTP: x?.IsEnableOTP || false,
         IsTourEnabled: x?.IsTourEnabled || false,
         AllowModifications: x?.AllowModifications || false,

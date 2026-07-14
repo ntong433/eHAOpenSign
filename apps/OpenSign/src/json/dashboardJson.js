@@ -35,8 +35,7 @@ const dashboardJson = [
             id: "c1935cc0-28d4-3d73-b72a-8c1e3d18a17f",
             queryType: "",
             class: "contracts_Document",
-            query:
-              'where={"Type":{"#*ne":"Folder"},"Signers":{"#*exists":true},"Placeholders":{"#*exists":true},"SignedUrl":{"#*exists":true},"IsCompleted":{"#*ne":true},"IsDeclined":{"#*ne":true},"IsArchive":{"#*ne":true},"CreatedBy":{"__type":"Pointer","className":"_User","objectId":"#currentUser#"},"ExpiryDate":{"#*gt":{"__type":"#Date#","iso":"#today#"}}}&count=1&limit=0',
+            query: 'where={"Type":{"#*ne":"Folder"},"Signers":{"#*exists":true},"Placeholders":{"#*exists":true},"SignedUrl":{"#*exists":true},"DocSentAt":{"#*exists":true},"IsCompleted":{"#*ne":true},"IsDeclined":{"#*ne":true},"IsArchive":{"#*ne":true},"CreatedBy":{"__type":"Pointer","className":"_User","objectId":"#currentUser#"},"ExpiryDate":{"#*gt":{"__type":"#Date#","iso":"#today#"}}}&count=1&limit=0',
             key: "count",
             Redirect_type: "Report",
             Redirect_id: "1MwEuxLEkF",

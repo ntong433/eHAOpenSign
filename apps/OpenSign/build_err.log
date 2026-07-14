@@ -1,0 +1,42 @@
+
+> open_sign@2.37.0 build
+> npm run version && NODE_OPTIONS="--max-old-space-size=8192" vite build
+
+
+> open_sign@2.37.0 version
+> curl -s https://api.github.com/repos/opensignlabs/opensign/releases/latest | grep '"tag_name":' | awk -F '"' '{print $4}' > ./public/version.txt
+
+vite v8.1.0 building client environment for production...
+[2Ktransforming...
+🌼   daisyUI 4.12.24
+├─ ✔︎ prefix is enabled		daisyUI classnames must use op- prefix
+├─ ✔︎ 2 themes added		https://daisyui.com/docs/themes
+╰─ ★ Star daisyUI on GitHub	https://github.com/saadeghi/daisyui
+
+
+🌼   daisyUI 4.12.24
+├─ ✔︎ prefix is enabled		daisyUI classnames must use op- prefix
+├─ ✔︎ 2 themes added		https://daisyui.com/docs/themes
+╰─ ❤︎ Support daisyUI project:	https://opencollective.com/daisyui
+
+[38;5;147m[LARGE_BARREL_MODULES] [0mnode_modules/@mui/icons-material/esm/index.js has 10611 re-exports. Eagerly resolving every entry can significantly slow down the build. Consider using `@rolldown/plugin-transform-imports` to rewrite imports at the source level so the barrel file is never loaded.
+ [38;5;240m │[0m 
+ [38;5;240m │[0m [38;5;115mHelp[0m: See https://github.com/rolldown/plugins/tree/main/packages/transform-imports for usage.
+
+✓ 3489 modules transformed.
+✗ Build failed in 8.98s
+error during build:
+Build failed with 1 error:
+
+[31m[builtin:vite-transform] [0mExpected `:` but found `,`
+ - `:` expected in src/json/dashboardJson.js at 1906..1907
+
+    at aggregateBindingErrorsIntoJsError (file:///home/jay/Documents/LHI%20Sign/OpenSign/apps/OpenSign/node_modules/rolldown/dist/shared/error-B68YLzl3.mjs:48:18)
+    at unwrapBindingResult (file:///home/jay/Documents/LHI%20Sign/OpenSign/apps/OpenSign/node_modules/rolldown/dist/shared/error-B68YLzl3.mjs:18:128)
+    at #build (file:///home/jay/Documents/LHI%20Sign/OpenSign/apps/OpenSign/node_modules/rolldown/dist/shared/rolldown-build-DR0wzp0V.mjs:3256:34)
+    at async buildEnvironment (file:///home/jay/Documents/LHI%20Sign/OpenSign/apps/OpenSign/node_modules/vite/dist/node/chunks/node.js:32575:66)
+    at async Object.build (file:///home/jay/Documents/LHI%20Sign/OpenSign/apps/OpenSign/node_modules/vite/dist/node/chunks/node.js:32997:19)
+    at async Object.buildApp (file:///home/jay/Documents/LHI%20Sign/OpenSign/apps/OpenSign/node_modules/vite/dist/node/chunks/node.js:32994:153)
+    at async CAC.<anonymous> (file:///home/jay/Documents/LHI%20Sign/OpenSign/apps/OpenSign/node_modules/vite/dist/node/cli.js:777:3) {
+  errors: [Getter/Setter]
+}

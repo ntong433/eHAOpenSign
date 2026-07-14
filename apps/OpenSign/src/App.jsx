@@ -255,6 +255,7 @@ function App() {
             </Route>
             <Route path="/success" element={<DocSuccessPage />} />
             <Route path="/emailbuilder" element={<EmailBuilder />} />
+            <Route path="/auth/microsoft/callback" element={<AppLoader />} />
             <Route path="*" element={<PageNotFound />} />
           </Routes>
         </BrowserRouter>
