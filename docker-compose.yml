@@ -72,7 +72,7 @@ services:
       - app-network
 
   mongo:
-    image: mongo:8.0
+    image: mongo:latest
     container_name: lhi-sign-mongo
     restart: unless-stopped
     volumes:
