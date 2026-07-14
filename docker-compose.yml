@@ -6,8 +6,10 @@ services:
     container_name: lhi-sign-gateway
     restart: unless-stopped
     depends_on:
-      - client
-      - server
+      client:
+        condition: service_healthy
+      server:
+        condition: service_healthy
     ports:
       - "3000:3000"
     networks:
@@ -34,6 +36,12 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       REACT_APP_SERVERURL: ${REACT_APP_SERVERURL:-/api/app}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - app-network
 
@@ -46,14 +54,15 @@ services:
       - "8085:8085"
     restart: unless-stopped
     depends_on:
-      - mongo
+      mongo:
+        condition: service_started
     volumes:
       - opensign-files:/usr/src/app/files
     environment:
       NODE_ENV: production
       PORT: 8085
       APP_ID: ${APP_ID:-opensign}
-      MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY in Coolify}
+      MASTER_KEY: ${MASTER_KEY:-changeme}
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/opensign}
       DATABASE_URI: ${DATABASE_URI:-mongodb://mongo:27017/opensign}
       PARSE_MOUNT: ${PARSE_MOUNT:-/app}
@@ -68,11 +77,17 @@ services:
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org/api/auth/microsoft/callback}
       PFX_BASE64: ${PFX_BASE64:-}
       PASS_PHRASE: ${PASS_PHRASE:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - app-network
 
   mongo:
-    image: mongo:latest
+    image: mongo:7
     container_name: lhi-sign-mongo
     restart: unless-stopped
     volumes:
