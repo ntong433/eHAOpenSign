@@ -9,7 +9,7 @@ services:
       client:
         condition: service_healthy
       server:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "3000:3000"
     networks:
@@ -77,12 +77,6 @@ services:
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org/api/auth/microsoft/callback}
       PFX_BASE64: ${PFX_BASE64:-}
       PASS_PHRASE: ${PASS_PHRASE:-}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085/"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
     networks:
       - app-network
 
