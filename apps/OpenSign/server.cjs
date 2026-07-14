@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /* eslint-env node */
 /* eslint-disable no-console */
-// Unified server for the production build.
-// - Proxies /api/* requests to the backend Parse server (strips /api prefix)
+// Tiny static file server for the production build.
 // - Serves real files from ./build (including dotfile dirs like .well-known)
 // - Falls back to /index.html only when the requested path does not exist
 //   (SPA client-side routing).
@@ -13,10 +12,6 @@ const path = require("node:path");
 const root = path.join(__dirname, "build");
 const port = Number(process.env.PORT) || 3000;
 const host = process.env.HOST || "0.0.0.0";
-
-// Backend server for API proxying — strip /api prefix when forwarding
-const API_HOST = process.env.API_HOST || "server";
-const API_PORT = Number(process.env.API_PORT) || 8085;
 
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -46,6 +41,7 @@ const mime = {
 function contentType(filePath) {
   return mime[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
+
 
 function safeJoin(reqPath) {
   let decoded;
@@ -119,49 +115,9 @@ function sendIndex(req, res) {
   });
 }
 
-// Forward /api/* requests to the backend server, stripping the /api prefix.
-// e.g. /api/app/classes/User → http://server:8085/app/classes/User
-function proxyToBackend(req, res) {
-  const targetPath = req.url.slice(4); // strip leading '/api'
-  const headers = { ...req.headers };
-  delete headers["host"];
-  delete headers["connection"];
-
-  const options = {
-    hostname: API_HOST,
-    port: API_PORT,
-    path: targetPath,
-    method: req.method,
-    headers,
-  };
-
-  const proxyReq = http.request(options, (proxyRes) => {
-    const responseHeaders = { ...proxyRes.headers };
-    delete responseHeaders["transfer-encoding"];
-    res.writeHead(proxyRes.statusCode, responseHeaders);
-    proxyRes.pipe(res, { end: true });
-  });
-
-  proxyReq.on("error", (err) => {
-    console.error("Proxy error:", err.message);
-    if (!res.headersSent) {
-      res.writeHead(502, { "Content-Type": "text/plain" });
-      res.end("Bad Gateway");
-    }
-  });
-
-  req.pipe(proxyReq, { end: true });
-}
-
 const server = http.createServer((req, res) => {
-  const reqUrl = req.url || "/";
-
-  // Proxy all /api/* traffic to the backend
-  if (reqUrl.startsWith("/api/") || reqUrl === "/api") {
-    return proxyToBackend(req, res);
-  }
-
   if (req.method === "OPTIONS") {
+    const filePath = safeJoin(req.url || "/");
     res.writeHead(204);
     return res.end();
   }
@@ -171,6 +127,7 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
+  const reqUrl = req.url || "/";
   const filePath = safeJoin(reqUrl);
   if (!filePath) {
     res.writeHead(400);
@@ -201,5 +158,4 @@ const server = http.createServer((req, res) => {
 
 server.listen(port, host, () => {
   console.log(`Serving ${root} on http://${host}:${port}`);
-  console.log(`Proxying /api/* → http://${API_HOST}:${API_PORT}`);
 });

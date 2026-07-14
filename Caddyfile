@@ -1,4 +1,7 @@
 :3000 {
+    log {
+        output stdout
+    }
     encode zstd gzip
 
     handle_path /api/* {

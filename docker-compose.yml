@@ -1,4 +1,20 @@
 services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: lhi-sign-gateway
+    restart: unless-stopped
+    depends_on:
+      client:
+        condition: service_healthy
+      server:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+
   client:
     build:
       context: .
@@ -15,29 +31,27 @@ services:
         VITE_MICROSOFT_REDIRECT_URI: ${VITE_MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org}
     container_name: lhi-sign-client
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
       HOST: 0.0.0.0
       REACT_APP_SERVERURL: ${REACT_APP_SERVERURL:-/api/app}
-      API_HOST: server
-      API_PORT: 8085
-    depends_on:
-      - server
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
+    networks:
+      - app-network
 
   server:
     build:
       context: .
       dockerfile: apps/OpenSignServer/Dockerfile
     container_name: lhi-sign-server
+    ports:
+      - "8085:8085"
     restart: unless-stopped
     depends_on:
       mongo:
@@ -63,6 +77,8 @@ services:
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org/api/auth/microsoft/callback}
       PFX_BASE64: ${PFX_BASE64:-}
       PASS_PHRASE: ${PASS_PHRASE:-}
+    networks:
+      - app-network
 
   mongo:
     image: mongo:8
@@ -70,6 +86,12 @@ services:
     restart: unless-stopped
     volumes:
       - data-volume:/data/db
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   data-volume:
