@@ -1,14 +1,20 @@
-:3000 {
-    log {
-        output stdout
-    }
-    encode zstd gzip
+:80 {
+	log {
+		output stdout
+	}
+	encode gzip zstd
 
-    handle_path /api/* {
-        reverse_proxy server:8085
-    }
+	handle /health {
+		respond 200
+	}
 
-    handle {
-        reverse_proxy client:3000
-    }
+	@api path /api/*
+	handle @api {
+		uri strip_prefix /api
+		reverse_proxy server:8085
+	}
+
+	handle {
+		reverse_proxy client:3000
+	}
 }

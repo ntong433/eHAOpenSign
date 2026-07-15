@@ -9,9 +9,10 @@ const branding = getBrandingConfig();
 
 export function serverUrl_fn() {
   const env = getEnv();
-  const serverurl = env?.REACT_APP_SERVERURL
-    ? env.REACT_APP_SERVERURL // env.REACT_APP_SERVERURL is used for prod
-    : process.env.REACT_APP_SERVERURL; //  process.env.REACT_APP_SERVERURL is used for dev (locally)
+  const serverurl =
+    env?.SERVER_URL ||
+    env?.REACT_APP_SERVERURL ||
+    process.env.REACT_APP_SERVERURL;
   let baseUrl = serverurl ? serverurl : window.location.origin + "/api/app";
   return baseUrl;
 }
@@ -19,7 +20,7 @@ export const appInfo = {
   appName: branding.productName,
   applogo: branding.logoUrl || logo,
   loginLogo: branding.loginLogoUrl || branding.logoUrl || logo,
-  appId: process.env.REACT_APP_APPID ? process.env.REACT_APP_APPID : "opensign",
+  appId: getEnv()?.APP_ID || process.env.REACT_APP_APPID || "opensign",
   baseUrl: serverUrl_fn(),
   defaultRole: "contracts_User",
   fev_Icon: branding.faviconUrl || defaultFavicon,

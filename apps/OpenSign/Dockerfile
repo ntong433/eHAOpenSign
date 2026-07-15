@@ -8,7 +8,10 @@ RUN apt-get update \
 
 COPY apps/OpenSign/package*.json ./apps/OpenSign/
 WORKDIR /app/apps/OpenSign
-RUN npm ci
+RUN npm config set fetch-retries 10 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm ci --registry=https://registry.npmmirror.com
 
 WORKDIR /app
 COPY custom ./custom
@@ -40,6 +43,10 @@ RUN npm run build \
 FROM node:20-bookworm-slim AS runner
 
 WORKDIR /usr/src/app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates wget \
+  && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0

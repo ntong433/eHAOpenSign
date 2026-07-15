@@ -15,6 +15,36 @@ import { SSOAuth } from './auth/authadapter.js';
 import runDbMigrations from './migrationdb/index.js';
 import { validateSignedLocalUrl } from './cloud/parsefunction/getSignedUrl.js';
 import { EmailService } from './cloud/services/EmailService.js';
+
+const envName = process.env.NODE_ENV || 'development';
+const isProduction = envName === 'production';
+const urlDefaults = isProduction
+  ? {
+      PUBLIC_URL: 'https://sign.lhinigeria.org',
+      SERVER_URL: 'https://sign.lhinigeria.org/api/app',
+    }
+  : {
+      PUBLIC_URL: 'http://localhost:3000',
+      SERVER_URL: 'http://localhost:8085/app',
+    };
+
+function resolveHttpUrl(name) {
+  const configured = process.env[name] || urlDefaults[name];
+  try {
+    const parsed = new URL(configured);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+      throw new Error('unsupported URL');
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    console.warn(`[WARN] ${name} is not a valid public HTTP(S) URL; using the ${envName} default.`);
+    return urlDefaults[name];
+  }
+}
+
+process.env.PUBLIC_URL = resolveHttpUrl('PUBLIC_URL');
+process.env.SERVER_URL = resolveHttpUrl('SERVER_URL');
+
 // Validate required environment configuration
 const requiredEnvVars = ['MASTER_KEY', 'SERVER_URL', 'PUBLIC_URL'];
 const missingVars = [];
@@ -35,9 +65,8 @@ const getOrigin = (urlStr) => {
   }
 };
 
-const envName = process.env.NODE_ENV || 'development';
 const publicAppOrigin = getOrigin(process.env.PUBLIC_URL);
-const publicParseOrigin = getOrigin(process.env.SERVER_URL);
+const publicParseOrigin = process.env.SERVER_URL;
 const redirectUri = process.env.MICROSOFT_REDIRECT_URI || process.env.VITE_MICROSOFT_REDIRECT_URI || '';
 const microsoftRedirectOrigin = getOrigin(redirectUri);
 const graphSenderMailbox = process.env.GRAPH_DEFAULT_SENDER || process.env.GRAPH_SERVICE_ACCOUNT || 'not set';
@@ -173,6 +202,12 @@ export const app = express();
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'lhi-sign-server',
+  });
+});
 app.use(function (req, res, next) {
   req.headers['x-real-ip'] = getUserIP(req);
   const publicUrl = process.env.PUBLIC_URL || ('https://' + req?.get('host'));

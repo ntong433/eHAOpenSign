@@ -8,23 +8,25 @@ import { Provider } from "react-redux";
 import { store } from "./redux/store";
 import Parse from "parse";
 import "./polyfills";
-import { serverUrl_fn } from "./constant/appinfo";
+import { appInfo, serverUrl_fn } from "./constant/appinfo";
+import { getEnv } from "./constant/Utils";
 import "./i18n";
 import { ScrollProvider } from "./context/ScrollPdfContext";
 import { applyEnterpriseBranding } from "@custom/branding/frontend";
 
 const appId =
-  import.meta.env.VITE_APPID || process.env.REACT_APP_APPID || "opensign";
+  appInfo.appId || import.meta.env.VITE_APPID || process.env.REACT_APP_APPID || "opensign";
 const serverUrl = serverUrl_fn();
 Parse.initialize(appId);
 Parse.serverURL = serverUrl;
 
 if (import.meta.env.DEV) {
-  console.log("=== Microsoft Auth Configuration ===");
-  console.log("Resolved Client ID:", import.meta.env.VITE_MICROSOFT_CLIENT_ID || "5946f825-88d7-47b9-ae8c-a5ec4df50999");
-  console.log("Resolved Tenant ID:", import.meta.env.VITE_MICROSOFT_TENANT_ID || "552a1d00-ce70-4fdb-940f-0ad131e4b9cb");
-  console.log("Resolved Redirect URI:", import.meta.env.VITE_MICROSOFT_REDIRECT_URI || "http://localhost:3000/auth/microsoft/callback");
-  console.log("====================================");
+  console.log("=== Parse Development Configuration ===");
+  console.log("Parse APP_ID prefix:", `${appId.slice(0, 4)}…`);
+  console.log("Parse server URL:", serverUrl);
+  console.log("Environment: development");
+  console.log("Local auth enabled:", getEnv()?.LOCAL_AUTH_ENABLED !== "false");
+  console.log("=======================================");
 }
 
 if (localStorage.getItem("showUpgradeProgress")) {

@@ -1,29 +1,33 @@
 #!/bin/sh
 
 ENV_FILE=./build/env.js
-DOTENV_FILE=./.env.prod # ✅ use .env.prod
 
 echo "Generating runtime env file at $ENV_FILE..."
 
-echo "window.RUNTIME_ENV = {" > $ENV_FILE
+escape_js_string() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\r//g; :a;N;$!ba;s/\n/\\n/g'
+}
 
-# List of keys to include
-RUNTIME_KEYS="REACT_APP_SERVERURL"
+public_url=$(printenv PUBLIC_URL)
+server_url=$(printenv SERVER_URL)
+react_server_url=$(printenv REACT_APP_SERVERURL)
+app_id=$(printenv APP_ID)
+local_auth_enabled=$(printenv REACT_APP_USE_LOCAL)
 
-for key in $RUNTIME_KEYS; do
-  # First check docker env (-e), fallback to .env file
-  value=$(printenv "$key")
+[ -n "$react_server_url" ] || react_server_url="$server_url"
+[ -n "$server_url" ] || server_url="$react_server_url"
+[ -n "$app_id" ] || app_id="opensign"
+[ -n "$local_auth_enabled" ] || local_auth_enabled="true"
 
-  if [ -z "$value" ] && [ -f "$DOTENV_FILE" ]; then
-    # fallback: read from .env
-    value=$(grep "^$key=" "$DOTENV_FILE" | cut -d '=' -f2- | tr -d '\r\n' | sed 's/"/\\"/g')
-  else
-    value=$(echo "$value" | sed 's/"/\\"/g')
-  fi
-
-  echo "  $key: \"$value\"," >> $ENV_FILE
-done
-
-echo "};" >> $ENV_FILE
+cat > "$ENV_FILE" <<EOF
+window.RUNTIME_CONFIG = {
+  PUBLIC_URL: "$(escape_js_string "$public_url")",
+  SERVER_URL: "$(escape_js_string "$server_url")",
+  REACT_APP_SERVERURL: "$(escape_js_string "$react_server_url")",
+  APP_ID: "$(escape_js_string "$app_id")",
+  LOCAL_AUTH_ENABLED: "$(escape_js_string "$local_auth_enabled")"
+};
+window.RUNTIME_ENV = window.RUNTIME_CONFIG;
+EOF
 
 exec "$@"

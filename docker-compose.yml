@@ -8,9 +8,17 @@ services:
       client:
         condition: service_healthy
       server:
-        condition: service_started
-    ports:
-      - "3000"
+        condition: service_healthy
+    expose:
+      - "80"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1/health >/dev/null || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   client:
     build:
@@ -27,14 +35,22 @@ services:
         VITE_MICROSOFT_TENANT_ID: ${VITE_MICROSOFT_TENANT_ID:-}
         VITE_MICROSOFT_REDIRECT_URI: ${VITE_MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org}
     restart: unless-stopped
+    expose:
+      - "3000"
     environment:
       NODE_ENV: production
       PORT: 3000
       HOST: 0.0.0.0
-      REACT_APP_SERVERURL: ${REACT_APP_SERVERURL:-/api/app}
+      APP_ID: ${APP_ID:-opensign}
+      PUBLIC_URL: ${PUBLIC_URL:-https://sign.lhinigeria.org}
+      SERVER_URL: ${SERVER_URL:-https://sign.lhinigeria.org/api/app}
+      REACT_APP_SERVERURL: ${REACT_APP_SERVERURL:-https://sign.lhinigeria.org/api/app}
+      REACT_APP_USE_LOCAL: ${USE_LOCAL:-true}
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 10s
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1
+      interval: 15s
       timeout: 5s
       retries: 10
       start_period: 30s
@@ -43,19 +59,19 @@ services:
     build:
       context: .
       dockerfile: apps/OpenSignServer/Dockerfile
-    ports:
-      - "8085"
     restart: unless-stopped
+    expose:
+      - "8085"
     depends_on:
       mongo:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - opensign-files:/usr/src/app/files
     environment:
       NODE_ENV: production
       PORT: 8085
       APP_ID: ${APP_ID:-opensign}
-      MASTER_KEY: ${MASTER_KEY:-changeme}
+      MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY in Coolify}
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/opensign}
       DATABASE_URI: ${DATABASE_URI:-mongodb://mongo:27017/opensign}
       PARSE_MOUNT: ${PARSE_MOUNT:-/app}
@@ -70,13 +86,33 @@ services:
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org/api/auth/microsoft/callback}
       PFX_BASE64: ${PFX_BASE64:-}
       PASS_PHRASE: ${PASS_PHRASE:-}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:8085/health >/dev/null || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   mongo:
     image: mongo:8
     restart: unless-stopped
+    expose:
+      - "27017"
     volumes:
       - data-volume:/data/db
-
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - db.adminCommand('ping').ok
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
 
 volumes:
   data-volume:

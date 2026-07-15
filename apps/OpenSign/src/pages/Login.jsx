@@ -94,16 +94,13 @@ function Login() {
     }
   };
   const handleChange = (event) => {
-    let { name, value } = event.target;
-    if (name === "email") {
-      value = value?.toLowerCase()?.replace(/\s/g, "");
-    }
+    const { name, value } = event.target;
     setState({ ...state, [name]: value });
   };
 
   const handleLogin = async (
   ) => {
-    const email = state?.email
+    const email = state?.email?.trim()?.toLowerCase()
     const password = state?.password
 
     if (!email || !password) {
@@ -132,6 +129,8 @@ function Login() {
       setState({ ...state, loading: false });
       if (error?.code === 1001) {
         showToast("danger", t("action-prohibited"));
+      } else if (error?.code === 100 || error?.message?.includes("fetch")) {
+        showToast("danger", t("server-down", { appName }));
       } else {
         showToast("danger", t("invalid-username-password-region"));
       }

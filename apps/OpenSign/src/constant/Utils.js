@@ -115,7 +115,7 @@ const applyDuplicateResponsesToPages = (pages = []) => {
   }));
 };
 export function getEnv() {
-  return window?.RUNTIME_ENV || {};
+  return window?.RUNTIME_CONFIG || window?.RUNTIME_ENV || {};
 }
 const appName = "Life Helpers Initiative";
 

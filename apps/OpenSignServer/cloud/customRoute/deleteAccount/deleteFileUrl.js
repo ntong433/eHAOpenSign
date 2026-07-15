@@ -4,9 +4,17 @@ import pLimit from 'p-limit';
 import { serverAppId } from '../../../Utils.js';
 
 // === Configuration ===
-const serverHost = new URL(process.env.SERVER_URL).hostname;
-const LOCAL_HOSTS = ['localhost', '127.0.0.1', serverHost];
 const CONCURRENCY_LIMIT = 5;
+
+function getLocalHosts() {
+  const hosts = ['localhost', '127.0.0.1'];
+  try {
+    hosts.push(new URL(process.env.SERVER_URL).hostname);
+  } catch {
+    // index.js validates SERVER_URL before requests can reach this helper.
+  }
+  return hosts;
+}
 
 // === S3 Client Setup ===
 function createS3Client({ region, accessKeyId, secretAccessKey, endpoint = null }) {
@@ -71,7 +79,7 @@ async function deleteLocalFile(fileUrl) {
     // console.log(`🗑️ Deleted local file: ${localPath}`);
   } catch (err) {
     if (err.code === 'ENOENT') {
-      console.warn('⚠️ Local file not found:', fileUrl);
+      console.warn('Local file was already absent during account deletion.');
     } else {
       console.error('❌ Local delete failed:', err.message);
     }
@@ -82,13 +90,13 @@ async function deleteFileByUrl(fileUrl) {
   if (!fileUrl) return;
   try {
     const url = new URL(fileUrl);
-    if (LOCAL_HOSTS.includes(url.hostname)) {
+    if (getLocalHosts().includes(url.hostname)) {
       return deleteLocalFile(fileUrl);
     } else {
       return deleteS3File(fileUrl);
     }
   } catch {
-    console.warn('⚠️ Invalid URL, skipping:', fileUrl);
+    console.warn('Invalid stored file URL encountered during account deletion; skipping it.');
   }
 }
 

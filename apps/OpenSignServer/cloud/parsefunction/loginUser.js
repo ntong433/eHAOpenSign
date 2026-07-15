@@ -1,13 +1,25 @@
-import crypto from 'node:crypto';
+const normalizeIdentity = value =>
+  typeof value === 'string' ? value.trim().toLowerCase() : '';
+
 export default async function loginUser(request) {
-  const username = request.params.email;
+  const identity = normalizeIdentity(request.params.email || request.params.username);
   const password = request.params.password;
 
-  if (username && password) {
+  if (identity && typeof password === 'string' && password.length > 0) {
+    let identityFound = false;
     try {
-      // Pass the username and password to logIn function
+      const usernameQuery = new Parse.Query(Parse.User);
+      usernameQuery.equalTo('username', identity);
+      const emailQuery = new Parse.Query(Parse.User);
+      emailQuery.equalTo('email', identity);
+      const matchedUser = await Parse.Query.or(usernameQuery, emailQuery).first({
+        useMasterKey: true,
+      });
+      identityFound = Boolean(matchedUser);
+      const username = matchedUser?.get('username') || identity;
+
+      // Password bytes are passed through exactly as submitted.
       const user = await Parse.User.logIn(username, password);
-      // console.log('user ', user);
       if (user) {
         const _user = user?.toJSON();
         return {
@@ -17,7 +29,7 @@ export default async function loginUser(request) {
         throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'user not found.');
       }
     } catch (err) {
-      console.log('err in login user', err);
+      console.warn('Local login failed', { code: err?.code, identityFound });
       throw err;
     }
   } else {

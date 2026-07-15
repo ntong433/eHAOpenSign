@@ -1,0 +1,28 @@
+services:
+  gateway:
+    ports:
+      - "127.0.0.1:18080:80"
+
+  client:
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: development
+      APP_ID: ${APP_ID:-opensign}
+      PUBLIC_URL: http://localhost:3000
+      SERVER_URL: http://localhost:8085/app
+      REACT_APP_SERVERURL: http://localhost:8085/app
+      REACT_APP_USE_LOCAL: "true"
+
+  server:
+    ports:
+      - "127.0.0.1:8085:8085"
+    environment:
+      NODE_ENV: development
+      APP_ID: ${APP_ID:-opensign}
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/OpenSignDB}
+      DATABASE_URI: ${DATABASE_URI:-mongodb://mongo:27017/OpenSignDB}
+      PARSE_MOUNT: /app
+      PUBLIC_URL: http://localhost:3000
+      SERVER_URL: http://localhost:8085/app
+      USE_LOCAL: "true"
