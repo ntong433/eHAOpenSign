@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gateway
-    container_name: lhi-sign-gateway
     restart: unless-stopped
     depends_on:
       client:
@@ -27,7 +26,6 @@ services:
         VITE_MICROSOFT_CLIENT_ID: ${VITE_MICROSOFT_CLIENT_ID:-}
         VITE_MICROSOFT_TENANT_ID: ${VITE_MICROSOFT_TENANT_ID:-}
         VITE_MICROSOFT_REDIRECT_URI: ${VITE_MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org}
-    container_name: lhi-sign-client
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -45,7 +43,6 @@ services:
     build:
       context: .
       dockerfile: apps/OpenSignServer/Dockerfile
-    container_name: lhi-sign-server
     ports:
       - "8085"
     restart: unless-stopped
@@ -76,7 +73,6 @@ services:
 
   mongo:
     image: mongo:8
-    container_name: lhi-sign-mongo
     restart: unless-stopped
     volumes:
       - data-volume:/data/db
