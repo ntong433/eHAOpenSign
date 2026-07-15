@@ -8,6 +8,13 @@
 		respond 200
 	}
 
+	# Microsoft returns its SPA authorization response in the URL fragment.
+	# Keep the Entra-registered callback URI, but serve it from the client so
+	# MSAL can read and complete the response in the browser.
+	handle /api/auth/microsoft/callback {
+		reverse_proxy client:3000
+	}
+
 	@api path /api/*
 	handle @api {
 		uri strip_prefix /api
