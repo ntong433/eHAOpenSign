@@ -83,7 +83,7 @@ services:
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
       MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
-      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org/api/auth/microsoft/callback}
+      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://sign.lhinigeria.org}
       PFX_BASE64: ${PFX_BASE64:-}
       PASS_PHRASE: ${PASS_PHRASE:-}
     healthcheck:
