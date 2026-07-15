@@ -4,6 +4,33 @@ let msalInstance = null;
 let msalInitializationPromise = null;
 let redirectResponsePromise = null;
 
+function isStaleAuthorizationError(error) {
+  const message = `${error?.errorCode || ''} ${error?.message || ''}`;
+  return (
+    message.includes('invalid_grant') ||
+    message.includes('AADSTS70008') ||
+    message.includes('authorization code')
+  );
+}
+
+async function resetStaleMicrosoftTransaction() {
+  if (msalInstance) {
+    await msalInstance.clearCache().catch(() => undefined);
+  }
+
+  msalInstance = null;
+  msalInitializationPromise = null;
+  redirectResponsePromise = null;
+
+  if (
+    window.location.pathname.includes('/auth/microsoft/callback') ||
+    window.location.search ||
+    window.location.hash
+  ) {
+    window.history.replaceState({}, document.title, '/');
+  }
+}
+
 export async function initializeMsal() {
   if (msalInitializationPromise) return msalInitializationPromise;
 
@@ -37,7 +64,14 @@ export async function initializeMsal() {
     // request. Running this on initialization also clears an abandoned redirect
     // marker when a callback was interrupted or landed on the wrong route.
     redirectResponsePromise = msalInstance.handleRedirectPromise();
-    await redirectResponsePromise;
+    try {
+      await redirectResponsePromise;
+    } catch (error) {
+      // Do not retain a rejected initialization promise. Otherwise every later
+      // click retries the same expired/redeemed authorization response.
+      msalInitializationPromise = null;
+      throw error;
+    }
 
     console.log("=== MSAL TRACE: MSAL Initialized ===");
     return msalInstance;
@@ -48,16 +82,23 @@ export async function initializeMsal() {
 
 export async function loginWithMicrosoftRedirect() {
   console.log("=== MSAL TRACE: MSAL Instance Initialized ===");
-  const msal = await initializeMsal();
-  
   const loginRequest = {
     scopes: ["user.read", "email", "profile"],
+    prompt: "select_account",
   };
 
   console.log("=== MSAL TRACE: loginRedirect() Called ===");
   try {
+    const msal = await initializeMsal();
     await msal.loginRedirect(loginRequest);
   } catch (error) {
+    if (isStaleAuthorizationError(error)) {
+      console.warn("Discarding stale Microsoft authorization response and restarting login.");
+      await resetStaleMicrosoftTransaction();
+      const msal = await initializeMsal();
+      await msal.loginRedirect(loginRequest);
+      return;
+    }
     console.error("Microsoft redirect login failed:", error);
     throw error;
   }
