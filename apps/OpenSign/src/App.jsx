@@ -123,10 +123,16 @@ function App() {
                   const redirectRoute = consumePostLoginRedirect() || fallbackRoute;
                   console.log("=== MSAL TRACE: Navigation target resolved ===", redirectRoute);
                   window.location.href = redirectRoute;
-                  return; // Stop execution, browser will navigate
+                  return;
+                } else {
+                  console.error("=== MSAL TRACE: No menu found for role ===", userRole);
+                  throw new Error(`Your account role (${userRole || 'unassigned'}) does not have a dashboard configured. Please contact your administrator.`);
                 }
+              } else {
+                console.error("=== MSAL TRACE: extUser is null or disabled ===");
+                throw new Error('Your account was not found or is disabled. Please contact your administrator.');
               }
-              // Fallback
+              // Fallback should never reach here
               window.location.href = "/";
               return;
             }

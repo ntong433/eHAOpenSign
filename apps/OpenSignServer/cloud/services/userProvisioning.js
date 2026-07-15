@@ -130,10 +130,15 @@ export async function provisionUser(graphUser) {
     
     await extUser.save(null, { useMasterKey: true });
   } else {
-    // Update existing extUser
+    // Update existing extUser — always ensure UserRole is set
     extUser.set('Name', graphUser.displayName || '');
     extUser.set('Company', graphUser.companyName || 'LHI Nigeria');
     extUser.set('JobTitle', graphUser.jobTitle || 'Employee');
+    extUser.set('Email', email);
+    // Preserve existing role or default to contracts_User so menu lookup succeeds
+    if (!extUser.get('UserRole')) {
+      extUser.set('UserRole', 'contracts_User');
+    }
     await extUser.save(null, { useMasterKey: true });
   }
   
