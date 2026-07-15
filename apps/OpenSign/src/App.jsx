@@ -17,7 +17,7 @@ import PdfRequestFiles from "./pages/PdfRequestFiles";
 import Lazy from "./primitives/LazyPage";
 import Loader from "./primitives/Loader";
 import UserList from "./pages/UserList";
-import { serverUrl_fn } from "./constant/appinfo";
+import { appInfo, serverUrl_fn } from "./constant/appinfo";
 import DocSuccessPage from "./pages/DocSuccessPage";
 import DragProvider from "./components/DragProivder";
 import Title from "./components/Title";
