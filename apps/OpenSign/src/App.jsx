@@ -69,16 +69,15 @@ function App() {
     
     const initializeApp = async () => {
       // 1. Check for Microsoft Redirect Callback before routing
-      if (window.location.hash.includes("code=") || window.location.search.includes("code=")) {
-        const currentUser = Parse.User.current();
-        const currentToken = localStorage.getItem("accesstoken");
-        if (currentUser && currentToken) {
-          console.log("=== MSAL TRACE: Active session found. Skipping redirect processing. ===");
-          window.history.replaceState({}, document.title, window.location.pathname);
-          setIsLoading(false);
-          return;
-        }
-
+      const isMicrosoftCallback = [
+        "/auth/microsoft/callback",
+        "/api/auth/microsoft/callback",
+      ].includes(window.location.pathname);
+      if (
+        isMicrosoftCallback ||
+        window.location.hash.includes("code=") ||
+        window.location.search.includes("code=")
+      ) {
         console.log("=== MSAL TRACE: Redirect detected ===");
         try {
           const msAuthData = await checkRedirectCallback();
@@ -132,6 +131,9 @@ function App() {
               return;
             }
           }
+          throw new Error(
+            "Microsoft returned to the application without a usable authentication response. Please try signing in again."
+          );
         } catch (error) {
           console.error("MSAL Redirect Processing Error:", error);
           setAuthError(error.message || "An error occurred during Microsoft login.");
